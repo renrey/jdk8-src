@@ -176,9 +176,12 @@ public class CyclicBarrier {
      */
     private void nextGeneration() {
         // signal completion of last generation
+        // 唤醒所有
         trip.signalAll();
         // set up next generation
+        // count重置
         count = parties;
+        // 创建新的Generation
         generation = new Generation();
     }
 
@@ -187,8 +190,11 @@ public class CyclicBarrier {
      * Called only while holding lock.
      */
     private void breakBarrier() {
+        // broken肯定为true，代表被打破
         generation.broken = true;
+        // count重置
         count = parties;
+        // 把其他线程唤醒，然后都会抛出异常
         trip.signalAll();
     }
 
@@ -199,42 +205,60 @@ public class CyclicBarrier {
         throws InterruptedException, BrokenBarrierException,
                TimeoutException {
         final ReentrantLock lock = this.lock;
+        // 1. 加锁
         lock.lock();
         try {
+            // 2. 获取当前这轮的Generation
             final Generation g = generation;
 
+            // 3. 已经broken，就异常
             if (g.broken)
                 throw new BrokenBarrierException();
-
+            // 线程被中断，也就是要breakBarrier
             if (Thread.interrupted()) {
                 breakBarrier();
                 throw new InterruptedException();
             }
 
+            // count-1
             int index = --count;
             if (index == 0) {  // tripped
                 boolean ranAction = false;
+                /**
+                 * count=0,已经达标，直接运行任务，然后唤醒队列其他线程，重置新的Genreation，开始新的一轮
+                 */
                 try {
                     final Runnable command = barrierCommand;
                     if (command != null)
                         command.run();
                     ranAction = true;
+                    // 开始新的
                     nextGeneration();
                     return 0;
                 } finally {
+                    /**
+                     * 最后一个线程运行时出异常，也是会breakBarrier
+                     */
                     if (!ranAction)
                         breakBarrier();
                 }
             }
 
             // loop until tripped, broken, interrupted, or timed out
+            /**
+             * 阻塞等待
+             */
             for (;;) {
                 try {
+                    // 进入trip队列等待
                     if (!timed)
                         trip.await();
                     else if (nanos > 0L)
                         nanos = trip.awaitNanos(nanos);
                 } catch (InterruptedException ie) {
+                    /**
+                     * 当前线程被中断，也是会breakBarrier
+                     */
                     if (g == generation && ! g.broken) {
                         breakBarrier();
                         throw ie;
@@ -245,13 +269,20 @@ public class CyclicBarrier {
                         Thread.currentThread().interrupt();
                     }
                 }
-
+                /**
+                 * 唤醒发现，发现本轮的Generation被break，异常
+                 */
                 if (g.broken)
                     throw new BrokenBarrierException();
 
+                /**
+                 * 正常，证明最后一个线程成功执行，且重置了Generation，直接返回成功
+                 */
                 if (g != generation)
                     return index;
-
+                /**
+                 * 线程超时，也是会breakBarrier
+                 */
                 if (timed && nanos <= 0L) {
                     breakBarrier();
                     throw new TimeoutException();
@@ -464,9 +495,12 @@ public class CyclicBarrier {
      */
     public void reset() {
         final ReentrantLock lock = this.lock;
+        // 加锁
         lock.lock();
         try {
+            // 打破当前轮
             breakBarrier();   // break the current generation
+            // 重置新的
             nextGeneration(); // start a new generation
         } finally {
             lock.unlock();

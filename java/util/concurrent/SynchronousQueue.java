@@ -768,7 +768,9 @@ public class SynchronousQueue<E> extends AbstractQueue<E>
                         clean(t, s);
                         return null;
                     }
-
+                    /**
+                     * 出队前把item指向s本身，方便回收
+                     */
                     if (!s.isOffList()) {           // not already unlinked
                         advanceHead(t, s);          // unlink if head
                         if (x != null)              // and forget fields
@@ -784,6 +786,9 @@ public class SynchronousQueue<E> extends AbstractQueue<E>
                         continue;                   // inconsistent read
 
                     Object x = m.item;
+                    /**
+                     * 更新head的item为当前值
+                     */
                     if (isData == (x != null) ||    // m already fulfilled
                         x == m ||                   // m cancelled
                         !m.casItem(x, e)) {         // lost CAS

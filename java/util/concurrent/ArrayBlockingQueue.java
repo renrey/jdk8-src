@@ -158,10 +158,15 @@ public class ArrayBlockingQueue<E> extends AbstractQueue<E>
         // assert lock.getHoldCount() == 1;
         // assert items[putIndex] == null;
         final Object[] items = this.items;
+        // 放入数组putIndex
         items[putIndex] = x;
+        /**
+         * putindex+1，如果超过范围，就从0开始
+         */
         if (++putIndex == items.length)
             putIndex = 0;
         count++;
+        // 唤醒notEmpty
         notEmpty.signal();
     }
 
@@ -173,14 +178,20 @@ public class ArrayBlockingQueue<E> extends AbstractQueue<E>
         // assert lock.getHoldCount() == 1;
         // assert items[takeIndex] != null;
         final Object[] items = this.items;
+        // 从takeIndex获取元素
         @SuppressWarnings("unchecked")
         E x = (E) items[takeIndex];
+        // 把对应元素设为null（取出）
         items[takeIndex] = null;
+        /**
+         * take+1, 超过就从0开始
+          */
         if (++takeIndex == items.length)
             takeIndex = 0;
         count--;
         if (itrs != null)
             itrs.elementDequeued();
+        // 有数据出来了，可以尝试唤醒notFull
         notFull.signal();
         return x;
     }
@@ -324,6 +335,7 @@ public class ArrayBlockingQueue<E> extends AbstractQueue<E>
     public boolean offer(E e) {
         checkNotNull(e);
         final ReentrantLock lock = this.lock;
+        // 1. 上锁
         lock.lock();
         try {
             if (count == items.length)
@@ -347,10 +359,13 @@ public class ArrayBlockingQueue<E> extends AbstractQueue<E>
     public void put(E e) throws InterruptedException {
         checkNotNull(e);
         final ReentrantLock lock = this.lock;
+        // 1. 加锁
         lock.lockInterruptibly();
         try {
+            // 2. 已满就放入，notFull等待
             while (count == items.length)
                 notFull.await();
+            // 3. 入队
             enqueue(e);
         } finally {
             lock.unlock();
@@ -397,10 +412,13 @@ public class ArrayBlockingQueue<E> extends AbstractQueue<E>
 
     public E take() throws InterruptedException {
         final ReentrantLock lock = this.lock;
+        // 1. 加锁
         lock.lockInterruptibly();
         try {
+            // 2. 没有元素可以拿，直接加入notEmpty等待
             while (count == 0)
                 notEmpty.await();
+            // 3. 唤醒后出队
             return dequeue();
         } finally {
             lock.unlock();
@@ -442,8 +460,14 @@ public class ArrayBlockingQueue<E> extends AbstractQueue<E>
      */
     public int size() {
         final ReentrantLock lock = this.lock;
+        /**
+         * 上锁，
+         * 避免没有修改完（释放锁）就能看到修改后的数量-原子性、顺序性（有可能count操作比修改早执行）
+         *
+         */
         lock.lock();
         try {
+            // 返回count
             return count;
         } finally {
             lock.unlock();
@@ -1059,18 +1083,24 @@ public class ArrayBlockingQueue<E> extends AbstractQueue<E>
             // assert lock.getHoldCount() == 0;
             lastRet = NONE;
             final ReentrantLock lock = ArrayBlockingQueue.this.lock;
+            // 1. 加锁
             lock.lock();
             try {
+                // 没数据直接什么都没
                 if (count == 0) {
                     // assert itrs == null;
                     cursor = NONE;
                     nextIndex = NONE;
                     prevTakeIndex = DETACHED;
                 } else {
+                    // prevTakeIndex：takeIndex下一个可以take的元素index
                     final int takeIndex = ArrayBlockingQueue.this.takeIndex;
                     prevTakeIndex = takeIndex;
+                    // nextItem: 下个take的元素（takeindex）
                     nextItem = itemAt(nextIndex = takeIndex);
+                    // cursor: takeIndex+1
                     cursor = incCursor(takeIndex);
+                    // 当前没有迭代器，新建
                     if (itrs == null) {
                         itrs = new Itrs(this);
                     } else {
@@ -1185,6 +1215,7 @@ public class ArrayBlockingQueue<E> extends AbstractQueue<E>
          */
         public boolean hasNext() {
             // assert lock.getHoldCount() == 0;
+            // 上一次返回值的时候，已经更新nextItem，所以其实不是takeIndex的即时值
             if (nextItem != null)
                 return true;
             noNext();
@@ -1219,6 +1250,7 @@ public class ArrayBlockingQueue<E> extends AbstractQueue<E>
             if (x == null)
                 throw new NoSuchElementException();
             final ReentrantLock lock = ArrayBlockingQueue.this.lock;
+            // 2. 加锁
             lock.lock();
             try {
                 if (!isDetached())
@@ -1227,9 +1259,12 @@ public class ArrayBlockingQueue<E> extends AbstractQueue<E>
                 // assert lastItem == null;
                 lastRet = nextIndex;
                 final int cursor = this.cursor;
+                // cursor还是正常，就是当前返回item的下标
                 if (cursor >= 0) {
+                    // 更新item，所以
                     nextItem = itemAt(nextIndex = cursor);
                     // assert nextItem != null;
+                    // 更新cursor+1，光标移到下一个
                     this.cursor = incCursor(cursor);
                 } else {
                     nextIndex = NONE;

@@ -257,6 +257,7 @@ public class Exchanger<V> {
     /**
      * The byte distance (as a shift value) between any two used slots
      * in the arena.  1 << ASHIFT should be at least cacheline size.
+     * 2个slot之间的字节距离，所以1<<<ASHIFT 应该是一个元素所需缓存行最小数量
      */
     private static final int ASHIFT = 7;
 
@@ -281,6 +282,9 @@ public class Exchanger<V> {
      * The maximum slot index of the arena: The number of slots that
      * can in principle hold all threads without contention, or at
      * most the maximum indexable value.
+     * 最大值：slot数量可以保证所有线程不能发送伪共享
+     * MASK << 1 : 1111 11110(510)
+     * 上限是255，但正常是核数/2（很少核数多过这个）
      */
     static final int FULL = (NCPU >= (MMASK << 1)) ? MMASK : NCPU >>> 1;
 
@@ -360,7 +364,9 @@ public class Exchanger<V> {
      */
     private final Object arenaExchange(Object item, boolean timed, long ns) {
         Node[] a = arena;
+        // 当前线程的participant
         Node p = participant.get();
+        // 从p在数组的下标开始
         for (int i = p.index;;) {                      // access slot at i
             int b, m, c; long j;                       // j is raw array offset
             Node q = (Node)U.getObjectVolatile(a, j = (i << ASHIFT) + ABASE);
@@ -452,32 +458,61 @@ public class Exchanger<V> {
      * TIMED_OUT if timed and timed out
      */
     private final Object slotExchange(Object item, boolean timed, long ns) {
+        /**
+         * 注意：Node使用Contended注解，实现缓存填充，避免缓存行伪共享
+         *
+         * 这个方法是单slot的交换（一个一个来），如果并发高，会创建一个arena的多slot数组，进行交换
+         */
         Node p = participant.get();
         Thread t = Thread.currentThread();
         if (t.isInterrupted()) // preserve interrupt status so caller can recheck
             return null;
 
         for (Node q;;) {
+            /**
+             * 已经有slot，就是有线程先执行exchange，在等待
+             */
             if ((q = slot) != null) {
+                // 把slot设为null
                 if (U.compareAndSwapObject(this, SLOT, q, null)) {
+                    // 成功就把这个slot的match更新为本线程的item
                     Object v = q.item;
                     q.match = item;
                     Thread w = q.parked;
+                    // 然后唤醒对面的线程
                     if (w != null)
                         U.unpark(w);
+                    // 返回自己取到对面的item
                     return v;
                 }
+                /**
+                 * 更新slot失败=有其他线程也竞争，所以创建arena多slot的数组
+                 */
                 // create arena on contention, but continue until slot null
                 if (NCPU > 1 && bound == 0 &&
                     U.compareAndSwapInt(this, BOUND, 0, SEQ))
+                /**
+                 * 创建arena数组：
+                 * 实际槽个数：核数/2+2
+                 * 而数组的大小是核数/2+2 << ASHIFT， 主要为了避免缓存行伪共享（1个槽占用ASHIFT个字节）
+                 */
                     arena = new Node[(FULL + 2) << ASHIFT];
             }
+            /**
+             * 已经有areana数组，只能进行多slot的交换
+             */
             else if (arena != null)
                 return null; // caller must reroute to arenaExchange
+            /**
+             * 一开始啥都没有执行（没slot、arena）
+             */
             else {
+                // 把participant的node的item更新
                 p.item = item;
+                // 把SLOT指向当前线程的p（participant）
                 if (U.compareAndSwapObject(this, SLOT, null, p))
                     break;
+                // 指向失败，就把participant的item=null，重新再来
                 p.item = null;
             }
         }
@@ -487,7 +522,11 @@ public class Exchanger<V> {
         long end = timed ? System.nanoTime() + ns : 0L;
         int spins = (NCPU > 1) ? SPINS : 1;
         Object v;
+        /**
+         * 循环知道配对到（match！=null）
+         */
         while ((v = p.match) == null) {
+            // 自旋
             if (spins > 0) {
                 h ^= h << 1; h ^= h >>> 3; h ^= h << 10;
                 if (h == 0)
@@ -497,23 +536,33 @@ public class Exchanger<V> {
             }
             else if (slot != p)
                 spins = SPINS;
+            // 没有arena，且还能等待（阻塞or有限时），进入等待
             else if (!t.isInterrupted() && arena == null &&
                      (!timed || (ns = end - System.nanoTime()) > 0L)) {
+                // 更新当前线程的parkBlocker为Exchanger对象
                 U.putObject(t, BLOCKER, this);
+                // 记录当前线程，用于唤醒
                 p.parked = t;
+                // 挂起前，校验当前的p是否还是slot，是就挂起等待
                 if (slot == p)
                     U.park(false, ns);
+                /**
+                 * slot已被修改了or被唤醒，把parked、parkBlocker置为null
+                 */
                 p.parked = null;
                 U.putObject(t, BLOCKER, null);
             }
+            // 超时、被中断，直接尝试更新slot为null，然后退出返回
             else if (U.compareAndSwapObject(this, SLOT, p, null)) {
                 v = timed && ns <= 0L && !t.isInterrupted() ? TIMED_OUT : null;
                 break;
             }
         }
+        // match、item都更新null，等于已完成，为了gc？
         U.putOrderedObject(p, MATCH, null);
         p.item = null;
         p.hash = h;
+        // 返回拿到对方的item（通过match）
         return v;
     }
 
@@ -560,7 +609,12 @@ public class Exchanger<V> {
     @SuppressWarnings("unchecked")
     public V exchange(V x) throws InterruptedException {
         Object v;
+        // 如果是null，也会创建一个对象传null
         Object item = (x == null) ? NULL_ITEM : x; // translate null args
+        /**
+         * 1. 没有arena数组,先进行单slot的交换slotExchange
+         * 2. 如果失败or有arena数组，进行arenaExchange多slot的交换
+         */
         if ((arena != null ||
              (v = slotExchange(item, false, 0L)) == null) &&
             ((Thread.interrupted() || // disambiguates null return

@@ -253,6 +253,7 @@ public class ConcurrentLinkedQueue<E> extends AbstractQueue<E>
      * Creates a {@code ConcurrentLinkedQueue} that is initially empty.
      */
     public ConcurrentLinkedQueue() {
+        // 初始都是item=null的Node
         head = tail = new Node<E>(null);
     }
 
@@ -325,28 +326,46 @@ public class ConcurrentLinkedQueue<E> extends AbstractQueue<E>
      */
     public boolean offer(E e) {
         checkNotNull(e);
+        // 1. 构建item=e的Node
         final Node<E> newNode = new Node<E>(e);
 
+        // 从tail开始
         for (Node<E> t = tail, p = t;;) {
-            Node<E> q = p.next;
+            Node<E> q = p.next;// 获取tail的next
+            /**
+             * 如果tail节点后没有插入新节点，尝试把newNode插入到tail的next，
+             * 成功就返回（尝试更新tail指向），失败就从最新的tail再来
+             */
             if (q == null) {
                 // p is last node
+                // cas更新tail的next为newNode，如果失败，就从最新的tail开始
                 if (p.casNext(null, newNode)) {
                     // Successful CAS is the linearization point
                     // for e to become an element of this queue,
                     // and for newNode to become "live".
+                    // 更新tail指向
                     if (p != t) // hop two nodes at a time
                         casTail(t, newNode);  // Failure is OK.
                     return true;
                 }
                 // Lost CAS race to another thread; re-read next
             }
+            /**
+             * 原tail节点的next指向了自己（第三次循环，前一次p=q），获取新的tail，然后p指向新的tail开始，
+             * 但是如果tail并没有更新指向（只是插入还没更新tail），就会从head开始(这样下一次一般不过，直接进入下一次循环)
+             */
             else if (p == q)
                 // We have fallen off list.  If tail is unchanged, it
                 // will also be off-list, in which case we need to
                 // jump to head, from which all live nodes are always
                 // reachable.  Else the new tail is a better bet.
                 p = (t != (t = tail)) ? t : head;
+            /**
+             * 已经有新node插入到队列，把p指向next或者最新的tail（一般第二次才会），再开始
+             *
+             * 一般p=t，直接next（为什么不直接tail？减少一次获取tail）
+             * 第二次p！=t，t更新成最新，且肯定与之前t不是同一个，就会指向最新t
+             */
             else
                 // Check for tail updates after two hops.
                 p = (p != t && t != (t = tail)) ? t : q;
@@ -356,22 +375,39 @@ public class ConcurrentLinkedQueue<E> extends AbstractQueue<E>
     public E poll() {
         restartFromHead:
         for (;;) {
+            // 从head开始
             for (Node<E> h = head, p = h, q;;) {
                 E item = p.item;
-
+                /**
+                 * 尝试把当前head的item更新null（节点的item=null就是被出队）
+                 */
                 if (item != null && p.casItem(item, null)) {
                     // Successful CAS is the linearization point
                     // for item to be removed from this queue.
+                    /**
+                     * 可以看到对head指向的更新是延迟的，需要进行到第2次循环（p！=h）才会更新head
+                     * 其实也可以看成head要每出队2次，才会更新head指向（因为第一次并没有更新指向）
+                     */
                     if (p != h) // hop two nodes at a time
                         updateHead(h, ((q = p.next) != null) ? q : p);
                     return item;
                 }
+                /**
+                 * 如果p已出队（上面不成功），看p（原head）有没有next，没有就直接更新把head更新成p（保证head肯定不是null），然后返回null
+                 * 简单地说，就是没有节点，直接返回null
+                 */
                 else if ((q = p.next) == null) {
                     updateHead(h, p);
                     return null;
                 }
+                /**
+                 * 证明进行了当前循环进行到了第二次，还是没出队成功，直接重新来
+                 */
                 else if (p == q)
                     continue restartFromHead;
+                /**
+                 * 就是几个条件的汇总，head已出队，还有next节点，把p=q，然后从next开始下一轮判断
+                 */
                 else
                     p = q;
             }
@@ -446,6 +482,9 @@ public class ConcurrentLinkedQueue<E> extends AbstractQueue<E>
      * @return the number of elements in this queue
      */
     public int size() {
+        /**
+         * 就是当前head开始遍历+1，但是会有并发问题，导致不正确
+         */
         int count = 0;
         for (Node<E> p = first(); p != null; p = succ(p))
             if (p.item != null)
