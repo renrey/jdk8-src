@@ -385,7 +385,7 @@ public class ConcurrentLinkedQueue<E> extends AbstractQueue<E>
                     // Successful CAS is the linearization point
                     // for item to be removed from this queue.
                     /**
-                     * 可以看到对head指向的更新是延迟的，需要进行到第2次循环（p！=h）才会更新head
+                     * 可以看到对head指向的更新是延迟的，需要一个线程执行到第2次循环（p更新了，才能p！=h）才会更新head
                      * 其实也可以看成head要每出队2次，才会更新head指向（因为第一次并没有更新指向）
                      */
                     if (p != h) // hop two nodes at a time
@@ -394,14 +394,15 @@ public class ConcurrentLinkedQueue<E> extends AbstractQueue<E>
                 }
                 /**
                  * 如果p已出队（上面不成功），看p（原head）有没有next，没有就直接更新把head更新成p（保证head肯定不是null），然后返回null
-                 * 简单地说，就是没有节点，直接返回null
+                 * 简单地说，就是没有节点，尝试更新head，直接返回null
                  */
                 else if ((q = p.next) == null) {
+                    // 尝试更新head为p（最后一个节点，实际已被出队，item=null），可能是第二次，head还是前一个
                     updateHead(h, p);
                     return null;
                 }
                 /**
-                 * 证明进行了当前循环进行到了第二次，还是没出队成功，直接重新来
+                 * 证明进行了当前循环进行到了第二次，还是没出队成功，直接重新来（因为一直用h变量，没有从head获取）
                  */
                 else if (p == q)
                     continue restartFromHead;

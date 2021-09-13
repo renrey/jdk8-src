@@ -625,15 +625,23 @@ public class HashMap<K,V> extends AbstractMap<K,V>
     final V putVal(int hash, K key, V value, boolean onlyIfAbsent,
                    boolean evict) {
         Node<K,V>[] tab; Node<K,V> p; int n, i;
+        // table未初始化，进行初始化数组
         if ((tab = table) == null || (n = tab.length) == 0)
             n = (tab = resize()).length;
+        // 寻址：(n - 1) & hash，不存在创建node，初始话这个位置的链表
         if ((p = tab[i = (n - 1) & hash]) == null)
             tab[i] = newNode(hash, key, value, null);
         else {
             Node<K,V> e; K k;
+            /**
+             * hash相同、key相等，找到key的node
+             */
             if (p.hash == hash &&
                 ((k = p.key) == key || (key != null && key.equals(k))))
                 e = p;
+            /**
+             * 如果当前位置已经是红黑树（TreeNode），按照红黑树方式放入
+             */
             else if (p instanceof TreeNode)
                 e = ((TreeNode<K,V>)p).putTreeVal(this, tab, hash, key, value);
             else {
@@ -1975,9 +1983,14 @@ public class HashMap<K,V> extends AbstractMap<K,V>
                                        int h, K k, V v) {
             Class<?> kc = null;
             boolean searched = false;
+            // 从root节点开始
             TreeNode<K,V> root = (parent != null) ? root() : this;
             for (TreeNode<K,V> p = root;;) {
                 int dir, ph; K pk;
+                /**
+                 * 比较两个key的大小，一定要比出谁大谁小
+                 * 先hash，后key
+                 */
                 if ((ph = p.hash) > h)
                     dir = -1;
                 else if (ph < h)
@@ -2000,15 +2013,28 @@ public class HashMap<K,V> extends AbstractMap<K,V>
                 }
 
                 TreeNode<K,V> xp = p;
+                /**
+                 * 左小右大的方式，找当前key所在的位置
+                 * 遍历到的节点对应位置的子节点没有，就是找到位置了
+                 *
+                 * 两个节点不只是父子关系，还是前后关系
+                 * 不只是插入左右子节点，而且当前key节点会插入遍历节点的后面（如果原来有next，插入到当前key后面）
+                 */
                 if ((p = (dir <= 0) ? p.left : p.right) == null) {
+                    // 原来xp的next节点
                     Node<K,V> xpn = xp.next;
+                    // 创建node，next为xp的next
                     TreeNode<K,V> x = map.newTreeNode(h, k, v, xpn);
+                    // 左小右大，设置xp子节点
                     if (dir <= 0)
                         xp.left = x;
                     else
                         xp.right = x;
+                    // xp的next节点、子节点更新成当前key节点x
                     xp.next = x;
+                    // 当前key的parent、prev更新成xp
                     x.parent = x.prev = xp;
+                    // 把xp原来的next节点的prev指向x（就是插到x后面）
                     if (xpn != null)
                         ((TreeNode<K,V>)xpn).prev = x;
                     moveRootToFront(tab, balanceInsertion(root, x));
