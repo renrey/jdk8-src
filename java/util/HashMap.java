@@ -644,20 +644,30 @@ public class HashMap<K,V> extends AbstractMap<K,V>
              */
             else if (p instanceof TreeNode)
                 e = ((TreeNode<K,V>)p).putTreeVal(this, tab, hash, key, value);
+            /**
+             * 单向链表
+             * 遍历单向链表，查找key的node，如果到最后一个（next为null的节点）还未找到，就创建node插入，
+             * 插入完，检查原来链表的元素是否达到了8个，达到就要对链表进行红黑树转换
+             */
             else {
                 for (int binCount = 0; ; ++binCount) {
+                    // 如果当前节点，没有next节点，创建node（当前key的），插入到末尾
                     if ((e = p.next) == null) {
                         p.next = newNode(hash, key, value, null);
+                        // 插入后，发现链表的元素原来已经达到8个，进行红黑树转换
                         if (binCount >= TREEIFY_THRESHOLD - 1) // -1 for 1st
                             treeifyBin(tab, hash);
                         break;
                     }
+                    // 判断是否需要的key
                     if (e.hash == hash &&
                         ((k = e.key) == key || (key != null && key.equals(k))))
                         break;
+                    // 进入下次循环
                     p = e;
                 }
             }
+            // 原来已有这个key，返回这个e
             if (e != null) { // existing mapping for key
                 V oldValue = e.value;
                 if (!onlyIfAbsent || oldValue == null)
@@ -666,7 +676,11 @@ public class HashMap<K,V> extends AbstractMap<K,V>
                 return oldValue;
             }
         }
+        /**
+         * 这边就是插入了node
+         */
         ++modCount;
+        // size+1后大于threshold，就进行扩容
         if (++size > threshold)
             resize();
         afterNodeInsertion(evict);
@@ -692,6 +706,10 @@ public class HashMap<K,V> extends AbstractMap<K,V>
                 threshold = Integer.MAX_VALUE;
                 return oldTab;
             }
+            /**
+             * 正常，原容量超过16，新的容量为原来的2倍
+             * threshold也为原来的2倍
+             */
             else if ((newCap = oldCap << 1) < MAXIMUM_CAPACITY &&
                      oldCap >= DEFAULT_INITIAL_CAPACITY)
                 newThr = oldThr << 1; // double threshold
@@ -708,24 +726,45 @@ public class HashMap<K,V> extends AbstractMap<K,V>
                       (int)ft : Integer.MAX_VALUE);
         }
         threshold = newThr;
+        // 构建新的table数组，用新的容量
         @SuppressWarnings({"rawtypes","unchecked"})
         Node<K,V>[] newTab = (Node<K,V>[])new Node[newCap];
         table = newTab;
+        /**
+         * 旧数组转移过程
+         */
         if (oldTab != null) {
+            // 遍历数组所有位置
             for (int j = 0; j < oldCap; ++j) {
                 Node<K,V> e;
                 if ((e = oldTab[j]) != null) {
                     oldTab[j] = null;
+                    // 单向链表，且只有一个元素
+                    // 直接把节点放到hash & (newCap -1)
                     if (e.next == null)
                         newTab[e.hash & (newCap - 1)] = e;
+                    /**
+                     * 红黑树
+                     */
                     else if (e instanceof TreeNode)
                         ((TreeNode<K,V>)e).split(this, newTab, j, oldCap);
+                    /**
+                     * 单向链表
+                     */
                     else { // preserve order
                         Node<K,V> loHead = null, loTail = null;
                         Node<K,V> hiHead = null, hiTail = null;
                         Node<K,V> next;
+                        /**
+                         * 遍历链表所有节点
+                         */
                         do {
                             next = e.next;
+                            /**
+                             * 新的位置判断：hash & oldCap
+                             * hash & oldCap=0，返回原位置
+                             * hash & oldCap！=0，则放到高位（原位置+cap）
+                             */
                             if ((e.hash & oldCap) == 0) {
                                 if (loTail == null)
                                     loHead = e;
@@ -741,10 +780,12 @@ public class HashMap<K,V> extends AbstractMap<K,V>
                                 hiTail = e;
                             }
                         } while ((e = next) != null);
+                        // 放入新数组的低位（就原位置）
                         if (loTail != null) {
                             loTail.next = null;
                             newTab[j] = loHead;
                         }
+                        // 放入新数组的高位（新增加的）
                         if (hiTail != null) {
                             hiTail.next = null;
                             newTab[j + oldCap] = hiHead;
