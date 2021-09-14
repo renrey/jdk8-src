@@ -763,7 +763,12 @@ public class HashMap<K,V> extends AbstractMap<K,V>
                             /**
                              * 新的位置判断：hash & oldCap
                              * hash & oldCap=0，返回原位置
-                             * hash & oldCap！=0，则放到高位（原位置+cap）
+                             * hash & oldCap！=0，则放到高位（原位置+旧cap）
+                             *
+                             * 其实就是判断与oldcap（100..0）的最高1进行与计算是否等于0
+                             * 因为扩容后oldcap的1左移一位，那么n-1比之前多了一个1，
+                             * 也就是看寻址时，key的hash在新增1的位置是否1,不是等于&之后还是原来，是的话就是&之后为1，
+                             * 那么如果有变化，新的位置 = 原cap(其他位都是0，就一位是1)+原位置
                              */
                             if ((e.hash & oldCap) == 0) {
                                 if (loTail == null)
@@ -1880,16 +1885,33 @@ public class HashMap<K,V> extends AbstractMap<K,V>
         static <K,V> void moveRootToFront(Node<K,V>[] tab, TreeNode<K,V> root) {
             int n;
             if (root != null && tab != null && (n = tab.length) > 0) {
+                // 寻址：（n-1） &hash
                 int index = (n - 1) & root.hash;
+                // 获取对应位置的node
                 TreeNode<K,V> first = (TreeNode<K,V>)tab[index];
+                // 如果不是root，就要进行更新，是就不用操作
                 if (root != first) {
                     Node<K,V> rn;
+                    // table对应更新成root
                     tab[index] = root;
+                    /**
+                     * root放入table后，还要更新TreeNode双向链表
+                     */
+                    // rn、rp就是root现在的next、prev
                     TreeNode<K,V> rp = root.prev;
+                    /**
+                     * 就是root从双向链表原位置出队
+                     */
+                    // rn的prev 指向 rp？
                     if ((rn = root.next) != null)
                         ((TreeNode<K,V>)rn).prev = rp;
+                    // rp的next指向rn
                     if (rp != null)
                         rp.next = rn;
+
+                    /**
+                     * root加到原第一个节点的前面
+                     */
                     if (first != null)
                         first.prev = root;
                     root.next = first;
@@ -2078,6 +2100,10 @@ public class HashMap<K,V> extends AbstractMap<K,V>
                     // 把xp原来的next节点的prev指向x（就是插到x后面）
                     if (xpn != null)
                         ((TreeNode<K,V>)xpn).prev = x;
+                    /**
+                     * balanceInsertion：进行红黑树插入转换
+                     * moveRootToFront：把root设置到table数组对应，作为第一个节点
+                     */
                     moveRootToFront(tab, balanceInsertion(root, x));
                     return null;
                 }
@@ -2254,18 +2280,38 @@ public class HashMap<K,V> extends AbstractMap<K,V>
 
         static <K,V> TreeNode<K,V> rotateLeft(TreeNode<K,V> root,
                                               TreeNode<K,V> p) {
+            /**
+             * 左旋：
+             * 右子节点（与旋的方向相反）代替自己在父节点的位置
+             * 右子节点的左子节点变成自己（与方向相同，自己原来的左就要取出）
+             * 原来左子节点变成自己的右子节点（与方向相反，就是变成父节点的节点的位置，补自己刚没的）
+             */
+
+            // r：右子节点
+            // pp: p的父节点
+            // rl：p原右子的原左
             TreeNode<K,V> r, pp, rl;
             if (p != null && (r = p.right) != null) {
+                // 当前节点p的right子 变成 原right的left
                 if ((rl = p.right = r.left) != null)
                     rl.parent = p;
+
+                // r的父节点变成p的父节点（右取代原来的位置）
+                // 如果本来就没父节点
                 if ((pp = r.parent = p.parent) == null)
+                    // r变成了root节点
+                    // 把r变黑
                     (root = r).red = false;
+                // 父节点存在
+                // 下面单纯更新父节点的子节点为r（看原节点是左还是右）
                 else if (pp.left == p)
                     pp.left = r;
                 else
                     pp.right = r;
+
+                // r的左变成p（原节点变成原右的左）
                 r.left = p;
-                p.parent = r;
+                p.parent = r;// 更新父节点
             }
             return root;
         }
@@ -2274,14 +2320,23 @@ public class HashMap<K,V> extends AbstractMap<K,V>
                                                TreeNode<K,V> p) {
             TreeNode<K,V> l, pp, lr;
             if (p != null && (l = p.left) != null) {
+                // 原节点left变成原right的右
+                // 因为原left要取代p的位置，p要变成原left的右，那么原left的右只能挂去p那，而原left的右比p小且左没了，所以挂到p的左
                 if ((lr = p.left = l.right) != null)
+                    // 更新原left的right节点父为p
                     lr.parent = p;
+
+                // 更新l的父节点为原父节点
+                // 如果父节点没有，那l就变成root，变黑然后返回
                 if ((pp = l.parent = p.parent) == null)
                     (root = l).red = false;
+                // 把父节点的子节点更新成left
                 else if (pp.right == p)
                     pp.right = l;
                 else
                     pp.left = l;
+
+                //
                 l.right = p;
                 p.parent = l;
             }
@@ -2290,35 +2345,107 @@ public class HashMap<K,V> extends AbstractMap<K,V>
 
         static <K,V> TreeNode<K,V> balanceInsertion(TreeNode<K,V> root,
                                                     TreeNode<K,V> x) {
+            // 使当前节点red，即插入节点为红
             x.red = true;
+            // xp：父节点，xpp：父父节点（父的父） xpp：父父节点的左子 xppr：父父节点的右子
+            /**
+             * 如果直接把当前节点变黑（父节点与祖父节点都是红），下次遍历从祖父节点开始
+             * 如果把祖父节点旋转（得到把三个节点中间的为黑、父节点，祖父节点和另外一个是子且红），下次遍历从三个节点中最小的节点开始（也就是得到的左子节点）
+             *
+             * 直到x的父节点没有，就是x节点作为root，且变黑
+             */
             for (TreeNode<K,V> xp, xpp, xppl, xppr;;) {
+                // 没有父节点，直接变为黑，返回
+                // 当前节点是root节点
                 if ((xp = x.parent) == null) {
                     x.red = false;
                     return x;
                 }
+                // 父节点黑 or 有父节点没有父父节点，返回root
+                // 父节点黑无需平衡，直接返回
+                // 父节点红，没有祖父节点，直接返回
                 else if (!xp.red || (xpp = xp.parent) == null)
                     return root;
+                // 父节点是左子
                 if (xp == (xppl = xpp.left)) {
+                    // 父节点红 and 叔父节点是红的
+                    // 父、叔父、当前都是红（父跟当前违反1个红节点只能子节点黑的），需要变色
+                    /**
+                     * xpp的子节点都是红的
+                     *       黑（xpp）
+                     *       /       \
+                     *      红（xp）   红（叔父节点）
+                     *      /\
+                     *      子节点
+                     *  直接把当前节点变黑就行
+                     */
                     if ((xppr = xpp.right) != null && xppr.red) {
+                        // 父节点跟叔父节点（父父节点的2个子节点）都设为黑
+                        // 祖父节点变为红
                         xppr.red = false;
                         xp.red = false;
                         xpp.red = true;
+                        // 下一个遍历的节点是xpp
                         x = xpp;
                     }
+                    // 父节点是红（还是违反子黑），没叔父节点or是黑的
+                    /**
+                     * xpp的子节点不全是红的情况
+                     * 1. 首先把三个节点（xpp、xp、x）变成连起来是同一个方向（xp是左还是右）
+                     * 如果xp是左，那就是按左遍历能遍历到这三个节点(如果当前节点不是同一个方向，左旋父节点，就是对父节点同一个方向的旋转   )
+                     * 2. 然后把中间的作为父，其他两个作为子节点，且是红的 （通过右旋祖父节点）
+                     */
                     else {
+                        /**
+                         *    黑（xpp）
+                         *   /
+                         *  红（xp）
+                         *   \
+                         *    红（x）
+                         */
+                        // 当前节点是右子节点的话
                         if (x == xp.right) {
+                            // 把父节点进行左旋
+                            /**
+                             * 左旋后：
+                             *    黑（xpp）
+                             *    /
+                             *   红（x）
+                             *   /
+                             * 红（xp）
+                             */
+                            // x 变成指向父节点
+                            // 实际x指向的是三级中，最底层的左(三个节点中最小的)
                             root = rotateLeft(root, x = xp);
                             xpp = (xp = x.parent) == null ? null : xp.parent;
                         }
+                        /**
+                         *  x是右子（左旋后）：     左子：
+                         *    黑（xpp）          黑（xpp）
+                         *    /                 /
+                         *   红（原x,现在xp）    红（xp）
+                         *   /                 /
+                         * 红（原xp，现在x指向）  红（x）
+                         */
+                        // 现在的xp就是中间的红节点
                         if (xp != null) {
+                            // 把中间的红变黑
                             xp.red = false;
+                            // 如果xp有父节点，就变红，然后对这个xpp进行右旋
                             if (xpp != null) {
                                 xpp.red = true;
                                 root = rotateRight(root, xpp);
+                                /**
+                                 * 变成x与xpp同级且都是红，都是xp的子
+                                 *        黑(xp，原中间的)
+                                 *      /    \
+                                 *     红(x)  红（xpp）
+                                 */
                             }
                         }
                     }
                 }
+                // 父节点是右子
                 else {
                     if (xppl != null && xppl.red) {
                         xppl.red = false;
