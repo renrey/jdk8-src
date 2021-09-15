@@ -167,6 +167,9 @@ public class ThreadLocal<T> {
                 return result;
             }
         }
+        // ThreadLocalMap未创建
+        // or 没找到对应Entry来返回value
+        // 就执行setInitialValue()进行初始化
         return setInitialValue();
     }
 
@@ -177,11 +180,14 @@ public class ThreadLocal<T> {
      * @return the initial value
      */
     private T setInitialValue() {
+        // 执行自定初始化函数
         T value = initialValue();
         Thread t = Thread.currentThread();
+        // double check 看有没有ThreadLocalMap
         ThreadLocalMap map = getMap(t);
         if (map != null)
             map.set(this, value);
+        // 创建ThreadLocalMap
         else
             createMap(t, value);
         return value;
@@ -241,6 +247,8 @@ public class ThreadLocal<T> {
      * @param firstValue value for the initial entry of the map
      */
     void createMap(Thread t, T firstValue) {
+        // 1。 创建ThreadLocalMap，且把 key=当前ThreadLocal对象和value传入放入
+        // 2。 当前Thread对象的threadLocals 属性引用ThreadLocalMap
         t.threadLocals = new ThreadLocalMap(this, firstValue);
     }
 
@@ -309,6 +317,18 @@ public class ThreadLocal<T> {
             /** The value associated with this ThreadLocal. */
             Object value;
 
+            /**
+             * 注意这里是把ThreadLocal对象作为弱引用
+             * 如果发生一次gc，这个ThreadLocal对象会变成null
+             *
+             * 如果线程未结束，此时这个Entry对象还存在没被回收（被Thread的ThreadLocalMap引用），那么当前entry对象无法使用，
+             * 这就造成内存泄漏！！！只有等到线程结束，才能被回收
+             * 如果线程池放在线程池内复用，那么就是一直内存泄漏！！！
+             * 因此每次用完ThreadLocal的对象的时候，需要remove掉
+             *
+             * @param k
+             * @param v
+             */
             Entry(ThreadLocal<?> k, Object v) {
                 super(k);
                 value = v;
@@ -347,6 +367,8 @@ public class ThreadLocal<T> {
          * Increment i modulo len.
          */
         private static int nextIndex(int i, int len) {
+            // 后移一位是否超出边界
+            // 未超过就下一位，超出就0
             return ((i + 1 < len) ? i + 1 : 0);
         }
 
@@ -363,8 +385,12 @@ public class ThreadLocal<T> {
          * one when we have at least one entry to put in it.
          */
         ThreadLocalMap(ThreadLocal<?> firstKey, Object firstValue) {
+            // 初始化table数组
             table = new Entry[INITIAL_CAPACITY];
+            // 给当前Key(ThreadLocal对象) 寻址
             int i = firstKey.threadLocalHashCode & (INITIAL_CAPACITY - 1);
+            // 创建Entry：key-ThreadLocal对象
+            // 放入table数组
             table[i] = new Entry(firstKey, firstValue);
             size = 1;
             setThreshold(INITIAL_CAPACITY);
@@ -411,10 +437,18 @@ public class ThreadLocal<T> {
          * @return the entry associated with key, or null if no such
          */
         private Entry getEntry(ThreadLocal<?> key) {
+            // hash & (n-1) 在table数组寻址Entry
             int i = key.threadLocalHashCode & (table.length - 1);
             Entry e = table[i];
+            /**
+             * entry 存在
+             * 并且 对ThreadLocal对象引用存在 是key （注意这里可能发生内存泄漏，可能引用没了，但entry的value对象还在）
+             */
             if (e != null && e.get() == key)
                 return e;
+            /**
+             * 不存在 or ThreadLocal对象已被gc（原value无法获取）
+             */
             else
                 return getEntryAfterMiss(key, i, e);
         }
@@ -462,16 +496,17 @@ public class ThreadLocal<T> {
             int len = tab.length;
             int i = key.threadLocalHashCode & (len-1);
 
+            // 如果对应table位置的ThreadLocal不符合，就到后一位的进行比较（如果到尾又回到头），直到找到为止
             for (Entry e = tab[i];
                  e != null;
                  e = tab[i = nextIndex(i, len)]) {
                 ThreadLocal<?> k = e.get();
-
+                // 同一个ThreadLocal对象，直接更新Entry的value
                 if (k == key) {
                     e.value = value;
                     return;
                 }
-
+                // 原ThreadLocal已经被回收
                 if (k == null) {
                     replaceStaleEntry(key, value, i);
                     return;

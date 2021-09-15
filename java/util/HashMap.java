@@ -744,7 +744,7 @@ public class HashMap<K,V> extends AbstractMap<K,V>
                     if (e.next == null)
                         newTab[e.hash & (newCap - 1)] = e;
                     /**
-                     * 红黑树
+                     * 红黑树,分裂
                      */
                     else if (e instanceof TreeNode)
                         ((TreeNode<K,V>)e).split(this, newTab, j, oldCap);
@@ -812,16 +812,26 @@ public class HashMap<K,V> extends AbstractMap<K,V>
             resize();
         else if ((e = tab[index = (n - 1) & hash]) != null) {
             TreeNode<K,V> hd = null, tl = null;
+            /**
+             * 单向链表变双向链表，node也变成TreeNode
+             */
+            // 遍历单向链表
             do {
+                // 创建对应节点的TreeNode
                 TreeNode<K,V> p = replacementTreeNode(e, null);
                 if (tl == null)
+                    // 当前没tail就是head
                     hd = p;
                 else {
+                    // 当前有尾，就插入到到tl的后面
                     p.prev = tl;
                     tl.next = p;
                 }
                 tl = p;
             } while ((e = e.next) != null);
+            /**
+             * 把新的双向链表放入table数组，然后进行红黑转换
+             */
             if ((tab[index] = hd) != null)
                 hd.treeify(tab);
         }
@@ -1982,19 +1992,32 @@ public class HashMap<K,V> extends AbstractMap<K,V>
          */
         final void treeify(Node<K,V>[] tab) {
             TreeNode<K,V> root = null;
+            /**
+             * 每个节点都进行一次红黑树的插入操作
+             */
+            // 遍历双向链表
             for (TreeNode<K,V> x = this, next; x != null; x = next) {
                 next = (TreeNode<K,V>)x.next;
+                // 先把当前节点left、right都置空
                 x.left = x.right = null;
+                // 第一个节点
+                // 如果当前没有root，当前先暂代root
                 if (root == null) {
+                    // root肯定是黑色的
                     x.parent = null;
                     x.red = false;
                     root = x;
                 }
+                // 其他节点
                 else {
                     K k = x.key;
                     int h = x.hash;
                     Class<?> kc = null;
+                    // 从当前已有的树结构进行红黑树的插入
                     for (TreeNode<K,V> p = root;;) {
+                        /**
+                         * 比较hash、key, 左小右大的方式遍历
+                         */
                         int dir, ph;
                         K pk = p.key;
                         if ((ph = p.hash) > h)
@@ -2007,6 +2030,10 @@ public class HashMap<K,V> extends AbstractMap<K,V>
                             dir = tieBreakOrder(k, pk);
 
                         TreeNode<K,V> xp = p;
+                        /**
+                         * 直到找到比较节点的对应原位置的没有子节点，把当前节点插入到这，
+                         * 然后再进行红黑树处理
+                         */
                         if ((p = (dir <= 0) ? p.left : p.right) == null) {
                             x.parent = xp;
                             if (dir <= 0)
@@ -2019,6 +2046,10 @@ public class HashMap<K,V> extends AbstractMap<K,V>
                     }
                 }
             }
+            /**
+             * 把root移动到双向链表第一位（直接出队放到第一）
+             * table的元素也指向root
+             */
             moveRootToFront(tab, root);
         }
 
@@ -2028,6 +2059,10 @@ public class HashMap<K,V> extends AbstractMap<K,V>
          */
         final Node<K,V> untreeify(HashMap<K,V> map) {
             Node<K,V> hd = null, tl = null;
+            /**
+             * 遍历TreeNode的双向链表
+             * 转换回Node，next拼接，变回单向链表
+             */
             for (Node<K,V> q = this; q != null; q = q.next) {
                 Node<K,V> p = map.replacementNode(q, null);
                 if (tl == null)
@@ -2226,7 +2261,7 @@ public class HashMap<K,V> extends AbstractMap<K,V>
          * @param map the map
          * @param tab the table for recording bin heads
          * @param index the index of the table being split
-         * @param bit the bit of hash to split on
+         * @param bit the bit of hash to split on 就是旧容量
          */
         final void split(HashMap<K,V> map, Node<K,V>[] tab, int index, int bit) {
             TreeNode<K,V> b = this;
@@ -2234,9 +2269,14 @@ public class HashMap<K,V> extends AbstractMap<K,V>
             TreeNode<K,V> loHead = null, loTail = null;
             TreeNode<K,V> hiHead = null, hiTail = null;
             int lc = 0, hc = 0;
+            // 遍历红黑树的双向链表
             for (TreeNode<K,V> e = b, next; e != null; e = next) {
                 next = (TreeNode<K,V>)e.next;
                 e.next = null;
+                /**
+                 * 如单向链表的判断：hash & oldCap
+                 * 也是根据这个判断分成2个双向链表
+                 */
                 if ((e.hash & bit) == 0) {
                     if ((e.prev = loTail) == null)
                         loHead = e;
@@ -2255,7 +2295,14 @@ public class HashMap<K,V> extends AbstractMap<K,V>
                 }
             }
 
+            /**
+             * 把2个双向链表分别放入新的table数组中
+             * 然后根据数量判断是
+             * 进行红黑树转化
+             * 或者去红黑树（变化单向链表、Node类型）
+             */
             if (loHead != null) {
+                // 小于等于6，就能变回单向链表
                 if (lc <= UNTREEIFY_THRESHOLD)
                     tab[index] = loHead.untreeify(map);
                 else {

@@ -294,6 +294,10 @@ public class LinkedHashMap<K,V>
             a.before = b;
     }
 
+    /**
+     * put新增
+     * @param evict
+     */
     void afterNodeInsertion(boolean evict) { // possibly remove eldest
         LinkedHashMap.Entry<K,V> first;
         if (evict && (first = head) != null && removeEldestEntry(first)) {
@@ -302,11 +306,23 @@ public class LinkedHashMap<K,V>
         }
     }
 
+    /**
+     * put更新or 开启accessOrder时，get 会触发
+     * @param e
+     */
     void afterNodeAccess(Node<K,V> e) { // move node to last
         LinkedHashMap.Entry<K,V> last;
         if (accessOrder && (last = tail) != e) {
+            // p：当前节点
+            // b：当前节点的prev
+            // a：当前节点的next
             LinkedHashMap.Entry<K,V> p =
                 (LinkedHashMap.Entry<K,V>)e, b = p.before, a = p.after;
+            // next置空
+            /**
+             * 就是把节点从当前链表取出
+             * b、a互相连接
+             */
             p.after = null;
             if (b == null)
                 head = a;
@@ -316,12 +332,19 @@ public class LinkedHashMap<K,V>
                 a.before = b;
             else
                 last = b;
+
+            /**
+             * 就是p放到最后
+             */
+            // 没有last=当前没有元素，head=p
             if (last == null)
                 head = p;
             else {
+                // 加入当前tail的后面
                 p.before = last;
                 last.after = p;
             }
+            // tail肯定是p
             tail = p;
             ++modCount;
         }
@@ -439,6 +462,9 @@ public class LinkedHashMap<K,V>
         Node<K,V> e;
         if ((e = getNode(hash(key), key)) == null)
             return null;
+        /**
+         * 就是新增了，每次访问，都会把当前节点放到链表最前面
+         */
         if (accessOrder)
             afterNodeAccess(e);
         return e.value;

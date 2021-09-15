@@ -348,6 +348,10 @@ public class TreeMap<K,V>
         @SuppressWarnings("unchecked")
             Comparable<? super K> k = (Comparable<? super K>) key;
         Entry<K,V> p = root;
+        /**
+         * 从root节点开始遍历比较，直到找到相同的key或者没有比较节点
+         * 就是在二叉树上遍历
+         */
         while (p != null) {
             int cmp = k.compareTo(p.key);
             if (cmp < 0)
@@ -534,9 +538,10 @@ public class TreeMap<K,V>
      */
     public V put(K key, V value) {
         Entry<K,V> t = root;
+        // 当前没有节点，直接成为root
         if (t == null) {
             compare(key, key); // type (and possibly null) check
-
+            // 创建Entry作为节点对象
             root = new Entry<>(key, value, null);
             size = 1;
             modCount++;
@@ -546,7 +551,13 @@ public class TreeMap<K,V>
         Entry<K,V> parent;
         // split comparator and comparable paths
         Comparator<? super K> cpr = comparator;
+        /**
+         * 尝试在二叉树寻找key的节点，找到就更新返回
+         */
         if (cpr != null) {
+            /**
+             * 以左小右大的方式，遍历二叉树进行比较，如果找key的Entry，就直接更新value返回
+             */
             do {
                 parent = t;
                 cmp = cpr.compare(key, t.key);
@@ -574,11 +585,19 @@ public class TreeMap<K,V>
                     return t.setValue(value);
             } while (t != null);
         }
+        /**
+         * 二叉树没这个key的Entry节点
+         */
+        // 创建entry，parent为刚刚最后比较的节点
         Entry<K,V> e = new Entry<>(key, value, parent);
+        // 插入parent的后面
         if (cmp < 0)
             parent.left = e;
         else
             parent.right = e;
+        /**
+         * 插入后，对二叉树，进行红黑树维护
+         */
         fixAfterInsertion(e);
         size++;
         modCount++;
@@ -2255,8 +2274,12 @@ public class TreeMap<K,V>
 
     /** From CLR */
     private void fixAfterInsertion(Entry<K,V> x) {
+        // 当前节点红节点
         x.color = RED;
 
+        /**
+         *
+         */
         while (x != null && x != root && x.parent.color == RED) {
             if (parentOf(x) == leftOf(parentOf(parentOf(x)))) {
                 Entry<K,V> y = rightOf(parentOf(parentOf(x)));
