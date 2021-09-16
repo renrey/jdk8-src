@@ -2278,43 +2278,75 @@ public class TreeMap<K,V>
         x.color = RED;
 
         /**
+         * x=root : 当前节点是root的，不用继续修正
+         * x.parent.color == RED：父节点是黑的，也不用修正
          *
+         * 进入循环，代表父节点存在
          */
         while (x != null && x != root && x.parent.color == RED) {
+            // 父节点是祖父节点的左子节点
             if (parentOf(x) == leftOf(parentOf(parentOf(x)))) {
+                // 获取叔父节点
                 Entry<K,V> y = rightOf(parentOf(parentOf(x)));
+                // 叔父节点是红的，直接把当前节点变黑
                 if (colorOf(y) == RED) {
                     setColor(parentOf(x), BLACK);
                     setColor(y, BLACK);
                     setColor(parentOf(parentOf(x)), RED);
+                    /**
+                     * 下次遍历从祖父节点开始
+                     */
                     x = parentOf(parentOf(x));
+                // 没有叔父节点 or 叔父节点是黑的
+                // 需要 祖父pp、父p、当前x 形成一直向左的趋势，然后对pp进行右旋
                 } else {
+                    // 当前节点x是右节点，即x>p，需要对父p进行左旋
+                    // 形成pp-x-p 的向左趋势，也就是pp>x>p
                     if (x == rightOf(parentOf(x))) {
                         x = parentOf(x);
                         rotateLeft(x);
                     }
+                    /**
+                     * 把中间节点染黑，祖父节点染红，把祖父节点右旋
+                     * 形成
+                     *        中间（黑）
+                     *       /  \
+                     *  最小（红）  祖父（红）
+                     *      从三级变成两级，且父级黑，2个子级红
+                     *   下次遍历从3个节点中最小节点（最值节点）开始
+                     *   左边从最小的继续
+                     */
                     setColor(parentOf(x), BLACK);
                     setColor(parentOf(parentOf(x)), RED);
                     rotateRight(parentOf(parentOf(x)));
                 }
+            // 父节点是右子
+            // 这边要形成向右的趋势
             } else {
                 Entry<K,V> y = leftOf(parentOf(parentOf(x)));
+                // 叔父节点红，直接把当前变黑
                 if (colorOf(y) == RED) {
                     setColor(parentOf(x), BLACK);
                     setColor(y, BLACK);
                     setColor(parentOf(parentOf(x)), RED);
                     x = parentOf(parentOf(x));
                 } else {
+                    // 当前x 是左，即x<p，那么右旋p，使的p在x右边，形成三个节点向右
                     if (x == leftOf(parentOf(x))) {
                         x = parentOf(x);
                         rotateRight(x);
                     }
+                    // 中间变黑，祖父变红
                     setColor(parentOf(x), BLACK);
                     setColor(parentOf(parentOf(x)), RED);
+                    // 左旋祖父（因为祖父最小），形成2级的树
+                    // 下次遍历从最大值开始（当前也就是当前的右）
+                    // 右从最大继续
                     rotateLeft(parentOf(parentOf(x)));
                 }
             }
         }
+        // 根节点肯定黑
         root.color = BLACK;
     }
 

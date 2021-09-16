@@ -2402,7 +2402,7 @@ public class HashMap<K,V> extends AbstractMap<K,V>
              * 直到x的父节点没有，就是x节点作为root，且变黑
              */
             for (TreeNode<K,V> xp, xpp, xppl, xppr;;) {
-                // 没有父节点，直接变为黑，返回
+                // 没有父节点，直接变为黑，返回（因为数据本来就有元素）
                 // 当前节点是root节点
                 if ((xp = x.parent) == null) {
                     x.red = false;
