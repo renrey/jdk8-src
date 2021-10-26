@@ -877,15 +877,23 @@ public class HashMap<K,V> extends AbstractMap<K,V>
     final Node<K,V> removeNode(int hash, Object key, Object value,
                                boolean matchValue, boolean movable) {
         Node<K,V>[] tab; Node<K,V> p; int n, index;
+        // 先寻址寻址：hash & （n-1）
         if ((tab = table) != null && (n = tab.length) > 0 &&
             (p = tab[index = (n - 1) & hash]) != null) {
             Node<K,V> node = null, e; K k; V v;
+            /**
+             * 1。 寻找key的节点
+             */
+            // 先对第一个节点进行比较，如果是就直接找到了
             if (p.hash == hash &&
                 ((k = p.key) == key || (key != null && key.equals(k))))
                 node = p;
+            // 遍历单向链表or红黑树
             else if ((e = p.next) != null) {
+                // 左小右大的方式在红黑树上遍历查找
                 if (p instanceof TreeNode)
                     node = ((TreeNode<K,V>)p).getTreeNode(hash, key);
+                // 单向链表向后遍历寻找
                 else {
                     do {
                         if (e.hash == hash &&
@@ -898,20 +906,30 @@ public class HashMap<K,V> extends AbstractMap<K,V>
                     } while ((e = e.next) != null);
                 }
             }
+            /**
+             * 2。存在这个key的节点，开始删除
+             */
             if (node != null && (!matchValue || (v = node.value) == value ||
                                  (value != null && value.equals(v)))) {
+                // 红黑树删除
                 if (node instanceof TreeNode)
                     ((TreeNode<K,V>)node).removeTreeNode(this, tab, movable);
+                // 如果是单向链表第一个节点，直接把table的对应位置指向next节点
                 else if (node == p)
                     tab[index] = node.next;
+                // 链表后面的元素，就把前一个元素的next指向当前节点的next节点
                 else
                     p.next = node.next;
                 ++modCount;
+                // size-1
                 --size;
                 afterNodeRemoval(node);
                 return node;
             }
         }
+        /**
+         * 3。没有这个key的节点，返回null
+         */
         return null;
     }
 
@@ -2161,18 +2179,38 @@ public class HashMap<K,V> extends AbstractMap<K,V>
             if (tab == null || (n = tab.length) == 0)
                 return;
             int index = (n - 1) & hash;
+            /**
+             * 1。先把当前节点从双向链表删除
+             * 如果是root，就要更新first跟table数组上的指向到next节点
+             */
+            // root节点，并且是双向链表第一节点
             TreeNode<K,V> first = (TreeNode<K,V>)tab[index], root = first, rl;
+            // succ：当前节点的next节点、pred：prev节点
             TreeNode<K,V> succ = (TreeNode<K,V>)next, pred = prev;
+            // 没有prev = 当前就是root节点
             if (pred == null)
+                // table数组的对应位置、双向链表的first都指向next节点
                 tab[index] = first = succ;
             else
+                // 不是，就把原来的prev的next指向next节点
                 pred.next = succ;
+            // next节点的prev再指向prev节点
             if (succ != null)
                 succ.prev = pred;
+            /**
+             * 删除后，当前链表无元素，直接返回
+             */
             if (first == null)
                 return;
+            /**
+             * 2。开始黑红树的删除
+             */
             if (root.parent != null)
                 root = root.root();
+            // root的右节点没有
+            // root的左子节点
+            // root的左子节点的左子节点没有
+            // 就会进行去树化，变化单向链表
             if (root == null
                 || (movable
                     && (root.right == null
@@ -2182,63 +2220,160 @@ public class HashMap<K,V> extends AbstractMap<K,V>
                 return;
             }
             TreeNode<K,V> p = this, pl = left, pr = right, replacement;
+            /**
+             * 首先会去找替代节点
+             * 当前节点的2个子节点都有的情况
+             * 1。先找右子节点的最左的后代节点作为s，没有就把右子节点作为s，其实就是找大于当前节点中的最小那个节点
+             * 2。当前节点与s交换位置，颜色也交换
+             * 3。如果s原来有右子节点（就是当前节点的右子节点），就作为当前节点替代节点，没有直接删除当前节点
+              */
             if (pl != null && pr != null) {
+                // s一开始是右子节点
                 TreeNode<K,V> s = pr, sl;
+                // 找到最左的孙后代节点（最小，不包含左子）
+                /**
+                 *      p
+                 *     / \
+                 *    pl  pr
+                 *        /
+                 *        s
+                 */
                 while ((sl = s.left) != null) // find successor
                     s = sl;
+                // 把s跟当前节点交换颜色
                 boolean c = s.red; s.red = p.red; p.red = c; // swap colors
                 TreeNode<K,V> sr = s.right;
                 TreeNode<K,V> pp = p.parent;
+                /**
+                 * 就是右子节点没有左子
+                 *      p
+                 *     / \
+                 *    pl  s(pr)
+                 */
                 if (s == pr) { // p was s's direct parent
+                    // 当前节点与右子节点呼唤位置（此时忽略，p<pr，pr是p的父，p是pr的right，而pl还是p的left）
                     p.parent = s;
                     s.right = p;
                 }
+                /**
+                 * 右子节点有左子后代
+                 *      p
+                 *     / \
+                 *    pl  pr
+                 *        /
+                 *        s
+                 */
                 else {
                     TreeNode<K,V> sp = s.parent;
+                    // 当前节点p换到s的位置
+                    // 当前节点父指向s的父
                     if ((p.parent = sp) != null) {
                         if (s == sp.left)
                             sp.left = p;
                         else
                             sp.right = p;
                     }
+                    // 因为s本身就没有左
+                    // 把s的right指向 p的右节点
+                    // 就是把原右点放到s的右节点
                     if ((s.right = pr) != null)
                         pr.parent = s;
+                    /**
+                     *      pp
+                     *      / (pp引用p)
+                     *      p(还没更新)      s
+                     *     /                 \
+                     *    pl                 pr(sp)
+                     *                       /
+                     *                       p
+                     *
+                     *
+                     */
                 }
+                /**
+                 * p完全取代原s的位置
+                 */
+                // 把p的左边引用去掉（p的没有左子）
                 p.left = null;
+                // p的右子变成s的原右
                 if ((p.right = sr) != null)
                     sr.parent = p;
+                /**
+                 * s完全取代原p的位置
+                 */
+                // s的left变成pl
                 if ((s.left = pl) != null)
                     pl.parent = s;
+                // s的parent变成pp
                 if ((s.parent = pp) == null)
                     root = s;
                 else if (p == pp.left)
                     pp.left = s;
                 else
                     pp.right = s;
+                /**
+                 * p的左子肯定为null
+                 *  有左子孙节点  ：       右无左子孙
+                 *      s                 pr(s)
+                 *     / \                / \
+                 *    pl  pr             pl  p（原s位置）
+                 *        /                    \
+                 *        p(原s位置)             sr
+                 *         \
+                 *         sr
+                 */
+
+                /**
+                 * 如果有原sr，就用原sr作为代替节点
+                 * 否则直接删除p就行
+                 */
                 if (sr != null)
                     replacement = sr;
                 else
                     replacement = p;
             }
+            /**
+             * 只有左子节点，替代为左
+             */
             else if (pl != null)
                 replacement = pl;
+            /**
+             * 只有右子节点，替代为右
+             */
             else if (pr != null)
                 replacement = pr;
+            /**
+             * 当前节点没有子节点
+             */
             else
                 replacement = p;
+            /**
+             * 使用替代节点，替代自己的位置
+             * 如果是root节点，就更新root
+             */
             if (replacement != p) {
+                // 代替节点的parent变成自己的parent
                 TreeNode<K,V> pp = replacement.parent = p.parent;
+                // 如果当前节点是root，代替节点变成root
                 if (pp == null)
                     root = replacement;
+                // 父节点的子节点指向代替节点
                 else if (p == pp.left)
                     pp.left = replacement;
                 else
                     pp.right = replacement;
+                // 把当前的节点引用去除
                 p.left = p.right = p.parent = null;
             }
 
+            /**
+             * 如果当前节点是黑节点，需要进行黑红树删除处理（对替代节点进行）
+             */
             TreeNode<K,V> r = p.red ? root : balanceDeletion(root, replacement);
 
+            /**
+             * 就是没有子节点的情况，就把当前节点直接删除就行
+             */
             if (replacement == p) {  // detach
                 TreeNode<K,V> pp = p.parent;
                 p.parent = null;
@@ -2249,6 +2384,9 @@ public class HashMap<K,V> extends AbstractMap<K,V>
                         pp.right = null;
                 }
             }
+            /**
+             * 把当前root移动双向链表第一位
+             */
             if (movable)
                 moveRootToFront(tab, r);
         }
@@ -2522,48 +2660,138 @@ public class HashMap<K,V> extends AbstractMap<K,V>
             for (TreeNode<K,V> xp, xpl, xpr;;) {
                 if (x == null || x == root)
                     return root;
+                // 是root节点，直接变黑
                 else if ((xp = x.parent) == null) {
                     x.red = false;
                     return x;
                 }
+                // 是红节点，直接变黑
                 else if (x.red) {
                     x.red = false;
                     return root;
                 }
+                // 当前节点是左子节点
                 else if ((xpl = xp.left) == x) {
+                    /***
+                     *  如果兄弟节点是红节点，需要左旋父节点，变黑兄弟节点，父节点变红
+                     *  兄弟节点的原左子，变成自己的兄弟节点
+                     *  1。保证x的兄弟肯定不是红的，黑或者没有都行
+                     *    xpp
+                     *     /
+                     *     xp（黑）
+                     *     / \
+                     * x（黑） xpr（红）
+                     */
+                    // 存在兄弟节点 并且 是红节点
                     if ((xpr = xp.right) != null && xpr.red) {
+                        // 兄弟变黑
                         xpr.red = false;
+                        // 父节点变红
                         xp.red = true;
+                        // 左移父节点
                         root = rotateLeft(root, xp);
+                        // xpr指向原兄弟节点的左子，也就是现在的兄弟节点
                         xpr = (xp = x.parent) == null ? null : xp.right;
+                        /***
+                         *       xpp
+                         *        /
+                         *       xpr（黑change）
+                         *       /
+                         *       xp（红change）
+                         *       /\
+                         *     x（黑） xprl（黑）
+                         */
                     }
+                    // 当前x的兄弟节点不存在，x指向父节点xp
+                    // 下次遍历从父节点开始
                     if (xpr == null)
                         x = xp;
+                    // 当前x的兄弟节点还有
                     else {
+
                         TreeNode<K,V> sl = xpr.left, sr = xpr.right;
+                        // 兄弟节点的2个子节点不是红的（即黑or没有），兄弟节点变红
+                        // 下次遍历从父节点开始
                         if ((sr == null || !sr.red) &&
                             (sl == null || !sl.red)) {
                             xpr.red = true;
                             x = xp;
                         }
+                        // 兄弟的节点有一个节点是红节点
                         else {
+                            /**
+                             *        xp
+                             *     /     \
+                             *    x（黑）xpr（黑）
+                             *           / \
+                             *          sl  sr
+                             *  2。 确保兄弟节点的右红了，兄弟节点是黑
+                             *   右没红的情况：
+                             *   1。右旋兄弟节点xpr
+                             *   2。旋转，使原xprl（就是现在的兄弟节点）变黑，使原xpr变红（现在的兄弟右）
+                             */
+                            // 如果右肯定没红，左子肯定红的
+                            // 右黑or没，左红
                             if (sr == null || !sr.red) {
+                                // 把xpr的左子变成黑
                                 if (sl != null)
                                     sl.red = false;
+                                // 兄弟xpr变红
                                 xpr.red = true;
+                                // 把xpr右旋
                                 root = rotateRight(root, xpr);
+                                /**
+                                 *        xp
+                                 *     /     \
+                                 *    x（黑） sl（黑，原来红）
+                                 *           / \
+                                 *              xpr（红）
+                                 *               \
+                                 *               sr
+                                 */
+                                // xpr指向x新的兄弟节点，也就是sl
                                 xpr = (xp = x.parent) == null ?
                                     null : xp.right;
                             }
+                            /**
+                             *
+                             * 维持x的兄弟节点是黑，兄弟的右子红
+                             * 左子红，右黑                             右红、双红
+                             *        xp                               xp
+                             *     /     \                          /     \
+                             *    x（黑） sl（黑，原来红）            x（黑）  xpr(黑)
+                             *           /  \                                /     \
+                             *      sll(黑)  xpr（红）                     sl（任意） sr(红)
+                             *               \
+                             *               sr（黑、无）
+                             */
                             if (xpr != null) {
+                                // 兄弟变成 父节点xp的颜色
                                 xpr.red = (xp == null) ? false : xp.red;
+                                // 兄弟的右子变黑
                                 if ((sr = xpr.right) != null)
                                     sr.red = false;
                             }
+                            // 把父节点变黑
+                            // 然后把父节点左旋
                             if (xp != null) {
                                 xp.red = false;
                                 root = rotateLeft(root, xp);
                             }
+                            /**
+                             * 第三次
+                             * 1。把兄弟节点与父节点换色，兄弟右xprr变黑（原来确保红的）
+                             * 2。左旋父节点，父节点变黑
+                             *     xpp
+                             *      /
+                             *     xpr(原xp的颜色)
+                             *     /      \
+                             *    xp（黑）  xprr(黑)
+                             *    /    \
+                             *   x(黑)  xprl(黑)
+                             *
+                             */
+                            // 结束了？
                             x = root;
                         }
                     }

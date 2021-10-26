@@ -139,12 +139,17 @@ public class LinkedList<E>
      */
     void linkLast(E e) {
         final Node<E> l = last;
+        // 1。 创建Node
         final Node<E> newNode = new Node<>(l, e, null);
+        // 2。先更新last指向
         last = newNode;
+        // 3。原来就没有last，那就是没元素，就把first也指向成当前节点
         if (l == null)
             first = newNode;
+        // 4。原来就有last，就把原last的next指向当前节点
         else
             l.next = newNode;
+        // 5。size+1
         size++;
         modCount++;
     }
@@ -212,6 +217,11 @@ public class LinkedList<E>
         final Node<E> next = x.next;
         final Node<E> prev = x.prev;
 
+        /**
+         * 先处理prev节点
+         * 如果当前节点是first（prev=null），就把first指向 next节点
+         * 正常有prev节点，就把prev节点的next 指向next节点，清除当前节点prev指向（gc）
+         */
         if (prev == null) {
             first = next;
         } else {
@@ -219,6 +229,11 @@ public class LinkedList<E>
             x.prev = null;
         }
 
+        /**
+         * 然后处理next节点
+         * 如果当前节点是last（next=null），就把last指向 prev节点
+         * 正常有next节点，就把next节点的prev 指向prev节点，清除当前节点next指向（gc）
+         */
         if (next == null) {
             last = prev;
         } else {
@@ -226,7 +241,9 @@ public class LinkedList<E>
             x.next = null;
         }
 
+        // item置空
         x.item = null;
+        // size-1
         size--;
         modCount++;
         return element;
@@ -335,6 +352,9 @@ public class LinkedList<E>
      * @return {@code true} (as specified by {@link Collection#add})
      */
     public boolean add(E e) {
+        /**
+         * 新增，直接从末尾插入linkLast
+         */
         linkLast(e);
         return true;
     }
@@ -353,6 +373,9 @@ public class LinkedList<E>
      * @return {@code true} if this list contained the specified element
      */
     public boolean remove(Object o) {
+        /**
+         * 1。 也是需要遍历单向链表比较查找
+         */
         if (o == null) {
             for (Node<E> x = first; x != null; x = x.next) {
                 if (x.item == null) {
@@ -362,6 +385,7 @@ public class LinkedList<E>
             }
         } else {
             for (Node<E> x = first; x != null; x = x.next) {
+                // 2。通过unlink删除这个节点
                 if (o.equals(x.item)) {
                     unlink(x);
                     return true;
@@ -474,6 +498,9 @@ public class LinkedList<E>
      */
     public E get(int index) {
         checkElementIndex(index);
+        // 查找index，
+        // index小于size的一半，从头向后寻找
+        // index大于等于size，从尾向前找
         return node(index).item;
     }
 
@@ -565,12 +592,13 @@ public class LinkedList<E>
      */
     Node<E> node(int index) {
         // assert isElementIndex(index);
-
+        // 如果index < size的一半，就从头开始，向后遍历
         if (index < (size >> 1)) {
             Node<E> x = first;
             for (int i = 0; i < index; i++)
                 x = x.next;
             return x;
+        // 大于就从尾开始，向前遍历
         } else {
             Node<E> x = last;
             for (int i = size - 1; i > index; i--)

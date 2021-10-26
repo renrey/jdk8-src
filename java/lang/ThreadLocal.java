@@ -466,10 +466,12 @@ public class ThreadLocal<T> {
             Entry[] tab = table;
             int len = tab.length;
 
+            // 如果key不是对应的ThreadLocal，且这个key不是null，会一直往下一位遍历寻址相同key的
             while (e != null) {
                 ThreadLocal<?> k = e.get();
                 if (k == key)
                     return e;
+                // key已经为null，把这个entry回收
                 if (k == null)
                     expungeStaleEntry(i);
                 else
@@ -496,7 +498,8 @@ public class ThreadLocal<T> {
             int len = tab.length;
             int i = key.threadLocalHashCode & (len-1);
 
-            // 如果对应table位置的ThreadLocal不符合，就到后一位的进行比较（如果到尾又回到头），直到找到为止
+            // 如果对应table位置的ThreadLocal不符合，就到后一位的进行比较（如果到尾又回到头），直到找到null的为止
+            // 一定会找到null的，因为threshold 是2/3，不是占全部
             for (Entry e = tab[i];
                  e != null;
                  e = tab[i = nextIndex(i, len)]) {
@@ -506,15 +509,18 @@ public class ThreadLocal<T> {
                     e.value = value;
                     return;
                 }
-                // 原ThreadLocal已经被回收
+                // 原ThreadLocal已经被回收nullkey
                 if (k == null) {
                     replaceStaleEntry(key, value, i);
                     return;
                 }
             }
 
+            // 找到null的位置，插入到对应位置
             tab[i] = new Entry(key, value);
+            // 数量+1
             int sz = ++size;
+            // 清除null key（ThreadLocal对象被回收的）的entry，判断是否达到threshold，达到进行扩容
             if (!cleanSomeSlots(i, sz) && sz >= threshold)
                 rehash();
         }
@@ -626,6 +632,7 @@ public class ThreadLocal<T> {
             int len = tab.length;
 
             // expunge entry at staleSlot
+            // 回收
             tab[staleSlot].value = null;
             tab[staleSlot] = null;
             size--;
@@ -633,21 +640,26 @@ public class ThreadLocal<T> {
             // Rehash until we encounter null
             Entry e;
             int i;
+            // 把这个位置后面的null key也会收
             for (i = nextIndex(staleSlot, len);
                  (e = tab[i]) != null;
                  i = nextIndex(i, len)) {
                 ThreadLocal<?> k = e.get();
+                // null key 回收
                 if (k == null) {
                     e.value = null;
                     tab[i] = null;
                     size--;
                 } else {
+                    // 找key 初始的table位置（可能由于已有entry，所以没在这个位置）
                     int h = k.threadLocalHashCode & (len - 1);
+                    // 插入时没放在这个的（往后放）
                     if (h != i) {
                         tab[i] = null;
 
                         // Unlike Knuth 6.4 Algorithm R, we must scan until
                         // null because multiple entries could have been stale.
+                        // 找到初始位置后（包括初始位置），第一个空的位置，然后把现在entry迁移到这个位置
                         while (tab[h] != null)
                             h = nextIndex(h, len);
                         tab[h] = e;
@@ -703,9 +715,13 @@ public class ThreadLocal<T> {
          * shrink the size of the table, double the table size.
          */
         private void rehash() {
+            // 清理null key
             expungeStaleEntries();
 
             // Use lower threshold for doubling to avoid hysteresis
+            /**
+             * 清理完，再判断是否需要清理（是否达到原threshold的3/4）
+             */
             if (size >= threshold - threshold / 4)
                 resize();
         }
@@ -716,6 +732,7 @@ public class ThreadLocal<T> {
         private void resize() {
             Entry[] oldTab = table;
             int oldLen = oldTab.length;
+            // 扩容一倍
             int newLen = oldLen * 2;
             Entry[] newTab = new Entry[newLen];
             int count = 0;

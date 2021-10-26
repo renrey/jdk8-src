@@ -257,6 +257,7 @@ public class ArrayList<E> extends AbstractList<E>
      */
     private void grow(int minCapacity) {
         // overflow-conscious code
+        // 扩容一半
         int oldCapacity = elementData.length;
         int newCapacity = oldCapacity + (oldCapacity >> 1);
         if (newCapacity - minCapacity < 0)
@@ -447,8 +448,10 @@ public class ArrayList<E> extends AbstractList<E>
      * @throws IndexOutOfBoundsException {@inheritDoc}
      */
     public E set(int index, E element) {
+        // 不过超过size，就是不能放入未有元素的位置
         rangeCheck(index);
 
+        // 直接替换
         E oldValue = elementData(index);
         elementData[index] = element;
         return oldValue;
@@ -461,7 +464,9 @@ public class ArrayList<E> extends AbstractList<E>
      * @return <tt>true</tt> (as specified by {@link Collection#add})
      */
     public boolean add(E e) {
+        // 元素数量size+1后是否超过数组上限，超过进行扩容
         ensureCapacityInternal(size + 1);  // Increments modCount!!
+        // 2。 放入数组size位置，size+1
         elementData[size++] = e;
         return true;
     }
@@ -478,9 +483,12 @@ public class ArrayList<E> extends AbstractList<E>
     public void add(int index, E element) {
         rangeCheckForAdd(index);
 
+        // 1。 检查是否需要扩容
         ensureCapacityInternal(size + 1);  // Increments modCount!!
+        // 2。把index的对象和后面对象，都拷贝到后一位
         System.arraycopy(elementData, index, elementData, index + 1,
                          size - index);
+        // 3。 放入index位置
         elementData[index] = element;
         size++;
     }
@@ -500,10 +508,13 @@ public class ArrayList<E> extends AbstractList<E>
         modCount++;
         E oldValue = elementData(index);
 
+        // 如果是中间，需要后面的元素前移一位
         int numMoved = size - index - 1;
         if (numMoved > 0)
             System.arraycopy(elementData, index+1, elementData, index,
                              numMoved);
+        // 把最后一位（size-1）设为null
+        // 然后size-1
         elementData[--size] = null; // clear to let GC do its work
 
         return oldValue;
@@ -523,6 +534,7 @@ public class ArrayList<E> extends AbstractList<E>
      * @return <tt>true</tt> if this list contained the specified element
      */
     public boolean remove(Object o) {
+        // 就是遍历数组，找到就删
         if (o == null) {
             for (int index = 0; index < size; index++)
                 if (elementData[index] == null) {
@@ -545,6 +557,7 @@ public class ArrayList<E> extends AbstractList<E>
      */
     private void fastRemove(int index) {
         modCount++;
+        // 如果是中间，需要把后面的元素前移一位
         int numMoved = size - index - 1;
         if (numMoved > 0)
             System.arraycopy(elementData, index+1, elementData, index,
