@@ -710,16 +710,26 @@ public class PriorityQueue<E> extends AbstractQueue<E>
 
     @SuppressWarnings("unchecked")
     private void siftDownUsingComparator(int k, E x) {
+        // 因为到这个位置就不会有子节点，通过下面子节点的下标计算方式：2i+1、2i+2，最后一个就是size-1，而size/2的子节点下标为2*（size/2）+1，最后等于size+1.
+        // 而最后一个（size-1）的父节点则为，（size-2）/2，即size/2-1，刚好在size/2的前面
         int half = size >>> 1;
+        // half就是刚好没有子节点的下标
         while (k < half) {
+            // *2+1，即左子节点
             int child = (k << 1) + 1;
             Object c = queue[child];
+            // 右子节点
             int right = child + 1;
+            // 右子节点< 原大小（不然）
+            // 左子的值>右子节点值
+            // 取右子节点，即需要2个子节点中最小
             if (right < size &&
                 comparator.compare((E) c, (E) queue[right]) > 0)
                 c = queue[child = right];
+            // 当前值比2个子节点值都小，直接终止
             if (comparator.compare(x, (E) c) <= 0)
                 break;
+            // 如果比最小子节点大，则交换，然后遍历这个最小的子节点位置
             queue[k] = c;
             k = child;
         }

@@ -248,6 +248,7 @@ public class DelayQueue<E extends Delayed> extends AbstractQueue<E>
             }
         } finally {
             // 当前没有第一个等待线程，但是队列还有元素，就尝试唤醒available
+            // 属于原leader线程操作
             if (leader == null && q.peek() != null)
                 available.signal();
             lock.unlock();
