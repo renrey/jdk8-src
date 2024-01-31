@@ -821,7 +821,8 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
             // 就是遍历workers，对所有worker的线程进行interrupt
             for (Worker w : workers) {
                 Thread t = w.thread;
-                // 就是还在执行任务无法中断，所以tryLock看有没有在执行任务
+                // tryLock成功：代表正在获取任务（可能在阻塞）
+                // 失败：代表还在执行任务
                 if (!t.isInterrupted() && w.tryLock()) {
                     try {
                         t.interrupt();
@@ -946,9 +947,9 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
 
             // Check if queue empty only if necessary.
             if (rs >= SHUTDOWN && // 已经调用shutdown时，判断
-                ! (rs == SHUTDOWN && // 已经不是SHUTDOWN状态，直接返回不能新建
-                   firstTask == null && // 正常到这里就停（除非是worker的processWorkerExit），SHUTDOWN时新增任务，返回不能新建
-                   ! workQueue.isEmpty())) // worker的processWorkerExit进入，没有任务就会返回，主要是SHUTDOWN时会新建一个worker用来继续处理
+                ! (rs == SHUTDOWN && // 非SHUTDOWN状态，不创建
+                   firstTask == null && // 这个代表只接受补充的，不接受用户提交的
+                   ! workQueue.isEmpty())) // 无任务需要处理
                 return false;
 
             for (;;) {
@@ -1088,18 +1089,19 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
 
         int c = ctl.get();
         // 就是RUNNING、SHUTDOWN状态进入，就是非shutdownNow（因为马上关闭）
-        // 主要是为了异常后补充一个线程
         if (runStateLessThan(c, STOP)) {
             // 正常关闭（其实就空闲超时）
             if (!completedAbruptly) {
                 int min = allowCoreThreadTimeOut ? 0 : corePoolSize;
                 if (min == 0 && ! workQueue.isEmpty())
                     min = 1;
-                // core worker数超出
+                // 保证当前有worker去处理队列任务（如果队列还有任务）
                 if (workerCountOf(c) >= min)
                     return; // replacement not needed
             }
-            // 尝试新建非core的worker
+            // 中断的，补充线程
+            // 正常的，但线程不够core数，也会补充
+            // 新建worker
             addWorker(null, false);
         }
     }
@@ -1492,7 +1494,7 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
          * worker < core数量，第一级判断
          */
         if (workerCountOf(c) < corePoolSize) {
-            // 创建worker，并且是core线程的方式
+            // 创建worker，并且是core线程的方式，并且是带着这个任务启动，一开始就执行这个任务
             if (addWorker(command, true))
                 return;
             c = ctl.get();
@@ -1502,10 +1504,12 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
          */
         if (isRunning(c) && workQueue.offer(command)) {
             int recheck = ctl.get();
+            // 线程池不是正常状态，拒绝
             if (! isRunning(recheck) && remove(command))
                 reject(command);
-            // 如果当前没有worker线程，新增非core的worker线程
+            // 如果当前没有worker线程，新增worker线程,使得有worker在运行
             else if (workerCountOf(recheck) == 0)
+                // 但这个新增worker，没有指定初始化，而是直接消费队列
                 addWorker(null, false);
         }
         /**

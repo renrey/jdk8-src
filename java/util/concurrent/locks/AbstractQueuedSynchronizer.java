@@ -805,16 +805,19 @@ public abstract class AbstractQueuedSynchronizer
              * Predecessor was cancelled. Skip over predecessors and
              * indicate retry.
              */
+            // 一直向前遍历找到1个不是状态不是负数（0：正常 1：已被取消）
             do {
+                // 即上一个节点移除
                 node.prev = pred = pred.prev;
             } while (pred.waitStatus > 0);
-            pred.next = node;
+            pred.next = node;// 找到的节点next更新，即中间的全去除
         } else {
             /*
              * waitStatus must be 0 or PROPAGATE.  Indicate that we
              * need a signal, but don't park yet.  Caller will need to
              * retry to make sure it cannot acquire before parking.
              */
+            // 变为SIGNAL
             compareAndSetWaitStatus(pred, ws, Node.SIGNAL);
         }
         return false;
@@ -859,14 +862,21 @@ public abstract class AbstractQueuedSynchronizer
         try {
             boolean interrupted = false;
             for (;;) {
+                // 前一个节点
                 final Node p = node.predecessor();
+                // 如果前一个是head，尝试获取
                 if (p == head && tryAcquire(arg)) {
+                    // 成功（获取到资源），自己变head
                     setHead(node);
+                    // 移除上一个节点
                     p.next = null; // help GC
                     failed = false;
                     return interrupted;
                 }
+                // 前面不是只有1个节点（需要阻塞等待）
+                // shouldParkAfterFailedAcquire: 把当前线程的节点状态变为SIGNAL（待唤醒）
                 if (shouldParkAfterFailedAcquire(p, node) &&
+                        // 通过LockSupport.park使当前线程阻塞等待，需要LockSupport.unpark唤醒
                     parkAndCheckInterrupt())
                     interrupted = true;
             }
@@ -1943,6 +1953,7 @@ public abstract class AbstractQueuedSynchronizer
             if (!isHeldExclusively())
                 throw new IllegalMonitorStateException();
             Node first = firstWaiter;
+            // 唤醒第一个
             if (first != null)
                 doSignal(first);
         }
@@ -2037,14 +2048,19 @@ public abstract class AbstractQueuedSynchronizer
         public final void await() throws InterruptedException {
             if (Thread.interrupted())
                 throw new InterruptedException();
+            // 加入到队列
             Node node = addConditionWaiter();
+            //
             int savedState = fullyRelease(node);
             int interruptMode = 0;
+            // 是否在正常（同步队列）中，不住
             while (!isOnSyncQueue(node)) {
+                // 当前线程阻塞等待
                 LockSupport.park(this);
                 if ((interruptMode = checkInterruptWhileWaiting(node)) != 0)
                     break;
             }
+            //
             if (acquireQueued(node, savedState) && interruptMode != THROW_IE)
                 interruptMode = REINTERRUPT;
             if (node.nextWaiter != null) // clean up if cancelled

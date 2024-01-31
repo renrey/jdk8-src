@@ -364,6 +364,16 @@ public class ConcurrentSkipListMap<K,V> extends AbstractMap<K,V>
 
     /**
      * The topmost head index of the skiplist.
+     *
+     * 这个head代表最高level的head，所以level是当前有多少层
+     * 也可以想成就是顶层入口
+     *
+     * 跳表索引头，实际是dummy 节点，结构是2种单向链表：
+     * 1. 当前层级链表：跳表横向
+     * 2. 当前节点在不同level的索引链表：跳表纵向
+     * 初始level是1
+     *
+     * 需要注意的是里面的node自己也维护一个单向链表：作为完整链表
      */
     private transient volatile HeadIndex<K,V> head;
 
@@ -394,6 +404,8 @@ public class ConcurrentSkipListMap<K,V> extends AbstractMap<K,V>
         entrySet = null;
         values = null;
         descendingMap = null;
+        // 主要时生成 headIndex 链表的dummy节点
+        // level=1
         head = new HeadIndex<K,V>(new Node<K,V>(null, BASE_HEADER, null),
                                   null, null, 1);
     }
@@ -563,9 +575,9 @@ public class ConcurrentSkipListMap<K,V> extends AbstractMap<K,V>
      * shared abstract class.
      */
     static class Index<K,V> {
-        final Node<K,V> node;
-        final Index<K,V> down;
-        volatile Index<K,V> right;
+        final Node<K,V> node;// 当前节点
+        final Index<K,V> down;// 下层节点
+        volatile Index<K,V> right;//当前层的next
 
         /**
          * Creates index node with given values.
@@ -635,9 +647,10 @@ public class ConcurrentSkipListMap<K,V> extends AbstractMap<K,V>
 
     /**
      * Nodes heading each level keep track of their level.
+     * 代表一个level层的head ，这个的node其实是dummy节点
      */
     static final class HeadIndex<K,V> extends Index<K,V> {
-        final int level;
+        final int level;// 代表当前这个个head属于哪个的level
         HeadIndex(Node<K,V> node, Index<K,V> down, Index<K,V> right, int level) {
             super(node, down, right);
             this.level = level;
@@ -668,11 +681,14 @@ public class ConcurrentSkipListMap<K,V> extends AbstractMap<K,V>
     private Node<K,V> findPredecessor(Object key, Comparator<? super K> cmp) {
         if (key == null)
             throw new NullPointerException(); // don't postpone errors
+        /**
+         * 就跟redis的一样，从上到下遍历找到大于当前key的最小节点
+         */
         for (;;) {
             // 从最高层index的head开始
-            // q：当前层级head index
-            // r：遍历到的节点
-            // d: 下一层级的head index
+            // q：当前层级head index, 即对应level的dummy
+            // r：遍历到的节点，与当前当前进行的比较
+            // d: 下一level的head index
             for (Index<K,V> q = head, r = q.right, d;;) {
                 // 没有下个index，就是当前层级的index已遍历完
                 if (r != null) {
@@ -680,15 +696,12 @@ public class ConcurrentSkipListMap<K,V> extends AbstractMap<K,V>
                     K k = n.key;
                     // 节点的值等于null，证明正在被删除，把删除剩下的也做，进入下次循环，到这个节点的下个节点
                     if (n.value == null) {
-                        if (!q.unlink(r))
+                        if (!q.unlink(r)) // 尝试帮忙unlink
                             break;           // restart
-                        r = q.right;         // reread r
+                        r = q.right;         // reread r。成功直接指针移动下个节点
                         continue;
                     }
-                    /**
-                     * key比当前节点的key大，进入下次循环，遍历当前层级的下个节点
-                     * 即向右移动
-                      */
+                    // key比r的大，指针到下个节点
                     if (cpr(cmp, key, k) > 0) {
                         q = r;
                         r = r.right;
@@ -698,17 +711,11 @@ public class ConcurrentSkipListMap<K,V> extends AbstractMap<K,V>
                 /**
                  * 到这里时，q已经是当前层级小于key中最大的index
                  */
-                /**
-                 * 当前层级index的head没有向下的index，就是遍历到了最低层index
-                 * 就是当前层级有index，直接返回当前遍历到的node（刚好最大的一个小于key的节点）
-                 * 或者是当前层级没index，返回headindex
-                 */
+                // 这个代表已经到最低层，可以返回了
                 if ((d = q.down) == null)
-                    return q.node;
-                /**
-                 * 向下移动遍历
-                 * q：原来遍历到q节点的向下节点
-                 */
+                    return q.node;// 因为使用的dummy节点的方式，所以返回是目标节点的前一个节点-》作为插入的位置
+
+                // 指针q向下的index（实际node是同一个，但使用的index不一样用来在不同level的链表上直观展示）
                 q = d;
                 r = d.right;
             }
@@ -851,9 +858,15 @@ public class ConcurrentSkipListMap<K,V> extends AbstractMap<K,V>
         if (key == null)
             throw new NullPointerException();
         Comparator<? super K> cmp = comparator;
+        // 这个循环做主要是维护node链表（全局完整链表）的操作：
+        // 1. 存在key就更新
+        // 2. 不存在，通过在查找时找到插入的位置并插入到全局链表
         outer: for (;;) {
             // 获取最低层index中，小于key中最大的那个index，从这个节点开始遍历完整链表（node）
+            // findPredecessor: 在跳表中从上到下扫描找到大于等于key的最小node，并返回对应前一个节点，
+            // 所以实际作用就是通过skiplist索引（不是遍历全局链表） 查找key，没有则返回可插入的位置
             for (Node<K,V> b = findPredecessor(key, cmp), n = b.next;;) {
+                // 存在大于key的最小node
                 if (n != null) {
                     Object v; int c;
                     Node<K,V> f = n.next;
@@ -873,9 +886,7 @@ public class ConcurrentSkipListMap<K,V> extends AbstractMap<K,V>
                         n = f;
                         continue;
                     }
-                    /**
-                     * 找到当前key值的节点，把这个节点n的值更新为value，返回原来的value，结束
-                     */
+                    // 当前key的node，直接更新返回
                     if (c == 0) {
                         if (onlyIfAbsent || n.casValue(v, value)) {
                             @SuppressWarnings("unchecked") V vv = (V)v;
@@ -886,11 +897,11 @@ public class ConcurrentSkipListMap<K,V> extends AbstractMap<K,V>
                     }
                     // else c < 0; fall through
                 }
-                /**
-                 * n==null（末尾） or 没找到与key相等的node，
-                 * 封装key为一个节点（next为n），插入到b节点后面
-                 * 这里是基于完整链表的层面（node）的插入
-                 */
+                // 这里是2种情况
+                // 1. 不存在大于key的最小node -》无节点(正常不存在)
+                // 2. 当前无这个key，找到了插入的位置 （其实就是这个情况）
+
+                // 直接在目标前置节点尾插（原始Node链表）
                 z = new Node<K,V>(key, value, n);
                 if (!b.casNext(n, z))
                     break;         // restart if lost race to append to b
@@ -898,80 +909,78 @@ public class ConcurrentSkipListMap<K,V> extends AbstractMap<K,V>
             }
         }
 
+        // 到这里代表key是新增的
+        // 下面就是往skiplist 插入新建当前key的索引节点
+
+        // 随机数用计算本次key放入的level
         int rnd = ThreadLocalRandom.nextSecondarySeed();
-        /**
-         * 如果随机数符合条件，就可以创建index
-         */
         if ((rnd & 0x80000001) == 0) { // test highest and lowest bits, 32位，头尾为1
             int level = 1, max;
-            // rnd一直除以2，得到的是奇数的话，level+1，然后继续循环，直到除以2得到的是0or偶数
+            // 最终level计算：随机数/2直到是偶数，/2循环的次数即level
             while (((rnd >>>= 1) & 1) != 0)
                 ++level;
             Index<K,V> idx = null;
             HeadIndex<K,V> h = head; // 当前的head？
-            /**
-             * 如果level<= head的层级
-             * 创建level个层级index（从1开始向上），且node都是z，down为下一层级的z
-             */
+             // 这次的随机level在当前max level内
             if (level <= (max = h.level)) {
+                // 给当前key生成在每个level的index(纵向链表)，且关联起来
                 for (int i = 1; i <= level; ++i)
+                    // 每个idx的down就是上一个
                     idx = new Index<K,V>(z, idx, null); // idx=为下一层级的index, z: 已经插入的node
             }
-            /**
-             *
-             */
+            // 超过了，需要新增level链表
             else { // try to grow by one level
                 // 需要扩容，level更新为max+1
+                // 即随机出来的level超过当前max的，则level固定变为max+1
                 level = max + 1; // hold in array and later pick the one to use
-                // 创建当前index数组长度为level+1，即head的level+2
+
+                // 目测idx数组用于找第n层的index节点使用的
                 @SuppressWarnings("unchecked")Index<K,V>[] idxs =
                     (Index<K,V>[])new Index<?,?>[level+1];
-                /**
-                 * 创建level个层级index（从1开始向上），且node都是z，down为下一层级的z
-                 */
+               // 给当前key生成纵向链表，且都放入到idx数组中（下标为对应level）
                 for (int i = 1; i <= level; ++i)
                     idxs[i] = idx = new Index<K,V>(z, idx, null);
+
+
                 for (;;) {
                     h = head;
-                    int oldLevel = h.level;
-                    if (level <= oldLevel) // lost race to add level，被其他线程（也是level大于原head的level）先操作，那就不操作了
+                    int oldLevel = h.level;// 获取当前跳表最新head的level
+                    if (level <= oldLevel) // lost race to add level，当前最新level比当前算出的大or等于，证明被其他线程扩容了
                         break;
+                   // 验证可以继续进行扩容
+
+                    // 这里代表newh是当前跳表dummy头节点的纵向链表（原来level）
                     HeadIndex<K,V> newh = h;
                     Node<K,V> oldbase = h.node;
-                    /**
-                     * 等于添加与原来的head层级差个HeadIndex(实际就一个HeadIndex，作为新的层级level的HeadIndex)
-                     * node：原head的node
-                     * down：原head
-                     * 层级：level，即h.level+1
-                     * right：idx的最后一个（level下标），
-                     */
+
+                    // 就是插入新的level横向链表头，到纵向链表中
+                    //   在head纵向链表基础上新增多出来的level个HeadIndex，实际只有1个
                     for (int j = oldLevel+1; j <= level; ++j)
-                        newh = new HeadIndex<K,V>(oldbase, newh, idxs[j], j);
-                    /**
-                     * 把head指向新的HeadIndex
-                     */
+                        newh = new HeadIndex<K,V>(oldbase, newh, idxs[j], j);// 都上层down指向下层
+
+                    // 这样现在newh是新level（max）的头
+                   // 全局跳表入口head指针  更新 -》 新的顶层入口
                     if (casHead(h, newh)) {
                         h = newh;
-                        /**
-                         * idx指向会原head的level的index，大概是因为还没插入到index树中
-                         */
+                        // idx变旧的顶层入口 -》就是插入level层链表入口
+                        // 注意：这里插入level变回旧max，即实际插入旧max层，扩容+1层是空闲的
                         idx = idxs[level = oldLevel];
                         break;
                     }
                 }
             }
             // find insertion points and splice in
-            // 从level开始遍历
+            // 从插入的最高level开始遍历
             splice: for (int insertionLevel = level;;) {
-                // j-当前head的层级
-                int j = h.level;
-                /**
-                 * 从head开始向右遍历
-                 */
+                int j = h.level; // 当前跳表的层级
+               // 从顶层链表遍历 -》 扫描跳表
+                // q：r的前置   r：实际比较节点 t： 当前key在这个层级的index节点
                 for (Index<K,V> q = h, r = q.right, t = idx;;) {
                     if (q == null || t == null)
                         break splice;
-                    // 如果右边index存在
+
+                    // 下面这段作用是找大于key的节点，小于则进入下次循环
+                    //  没到末尾
                     if (r != null) {
                         Node<K,V> n = r.node;
                         // compare before deletion check avoids needing recheck
@@ -987,35 +996,35 @@ public class ConcurrentSkipListMap<K,V> extends AbstractMap<K,V>
                         if (c > 0) {
                             q = r;
                             r = r.right;
-                            continue;
+                            continue;//小于key的，向右
                         }
                     }
-                    /**
-                     * 到这里，q是当前层级中小于key中最大的index节点 or headindex，idx插入到index树中
-                     *
-                     */
-                    // 当前遍历到的层级 = 当前需要插入index的层级
+
+                    // 到这里就是2种情况
+                    // 1. 在当前level链表找到大于key的最小节点
+                    // 2. 到末尾了，无这样的节点
+
+                    // 虽然到这里才验证插入层级，但本来就是得从顶层到下层遍历来查找，所以不影响总体
+                    // 等于前面是索引上扫描查找，下面是插入操作
+
+                    // 当前遍历到的层级 = 当前需要插入index的层级 -》 当前层级可以插入
                     if (j == insertionLevel) {
-                        // 把idx连接到q后面
+                        // 插入t 到q后面
                         if (!q.link(r, t))
                             break; // restart
                         if (t.node.value == null) {
                             findNode(key);
                             break splice;
                         }
-                        // 插入层级-1，如果等于0，就可以结束
+                        // 插入层级-1：用于下一层插入验证使用
+                        // 如果等于0，就可以结束
                         if (--insertionLevel == 0)
                             break splice;
                     }
 
-                    /**
-                     * 就是向下一层级移动
-                     * t为下一个层级的idx
-                     * q：下一层的head
-                     */
-                    // --j
                     if (--j >= insertionLevel && j < level)
                         t = t.down;
+                    // 下次是下一层的
                     q = q.down;
                     r = q.right;
                 }
@@ -1403,6 +1412,7 @@ public class ConcurrentSkipListMap<K,V> extends AbstractMap<K,V>
      */
     public ConcurrentSkipListMap() {
         this.comparator = null;
+        // 初始！！！
         initialize();
     }
 

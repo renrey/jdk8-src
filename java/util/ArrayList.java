@@ -508,13 +508,14 @@ public class ArrayList<E> extends AbstractList<E>
         modCount++;
         E oldValue = elementData(index);
 
-        // 如果是中间，需要后面的元素前移一位
+        // 判断是否最后，不是最后需要把后面的移动前面
         int numMoved = size - index - 1;
         if (numMoved > 0)
             System.arraycopy(elementData, index+1, elementData, index,
                              numMoved);
         // 把最后一位（size-1）设为null
         // 然后size-1
+        // 末尾置空
         elementData[--size] = null; // clear to let GC do its work
 
         return oldValue;

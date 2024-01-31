@@ -2167,14 +2167,17 @@ public class TreeMap<K,V>
     static <K,V> TreeMap.Entry<K,V> successor(Entry<K,V> t) {
         if (t == null)
             return null;
+        // 优先从右开始找大于自己的第1个---大于自己中最小的(自己的右节点，一直遍历左)
         else if (t.right != null) {
             Entry<K,V> p = t.right;
             while (p.left != null)
                 p = p.left;
             return p;
+       // 没右子，就向上找父节点，只要自己是他的左边，就返回
         } else {
             Entry<K,V> p = t.parent;
             Entry<K,V> ch = t;
+            // 如果当节点是右，即>父
             while (p != null && ch == p.right) {
                 ch = p;
                 p = p.parent;
@@ -2259,7 +2262,7 @@ public class TreeMap<K,V>
     private void rotateRight(Entry<K,V> p) {
         if (p != null) {
             Entry<K,V> l = p.left;
-            p.left = l.right;
+            p.left = l.right;// 左
             if (l.right != null) l.right.parent = p;
             l.parent = p.parent;
             if (p.parent == null)
@@ -2267,6 +2270,7 @@ public class TreeMap<K,V>
             else if (p.parent.right == p)
                 p.parent.right = l;
             else p.parent.left = l;
+            // 交换关系
             l.right = p;
             p.parent = l;
         }
@@ -2359,76 +2363,109 @@ public class TreeMap<K,V>
 
         // If strictly internal, copy successor's element to p and then make p
         // point to successor.
+        // 左右都有子节点
         if (p.left != null && p.right != null) {
+            // 找比自己大的中最小的
             Entry<K,V> s = successor(p);
+            // 把这个节点属性更新到当前节点
             p.key = s.key;
             p.value = s.value;
+            // 更新指针，后面对这个找到的节点操作
             p = s;
         } // p has 2 children
 
         // Start fixup at replacement node, if it exists.
+        // 有左就用左，无则右
         Entry<K,V> replacement = (p.left != null ? p.left : p.right);
 
+        // 子节点
         if (replacement != null) {
             // Link replacement to parent
+
+            // 把原对应位置交给replacement
+            // 把引用交给新的
             replacement.parent = p.parent;
+            // 原来就是root
             if (p.parent == null)
                 root = replacement;
+            // 节点在左
             else if (p == p.parent.left)
                 p.parent.left  = replacement;
             else
                 p.parent.right = replacement;
 
             // Null out links so they are OK to use by fixAfterDeletion.
+            // 把当前节点自己的引用zhi
             p.left = p.right = p.parent = null;
 
             // Fix replacement
             if (p.color == BLACK)
                 fixAfterDeletion(replacement);
+        // 当前已是root，root置空即可
         } else if (p.parent == null) { // return if we are the only node.
             root = null;
+       // 没子节点
         } else { //  No children. Use self as phantom replacement and unlink.
+            // 黑节点，需要平衡
             if (p.color == BLACK)
                 fixAfterDeletion(p);
-
+            // 非root，等于把p移除树
             if (p.parent != null) {
+                // 父节点的子引用清除
                 if (p == p.parent.left)
                     p.parent.left = null;
                 else if (p == p.parent.right)
                     p.parent.right = null;
-                p.parent = null;
+                p.parent = null;//自己parent引用清除
             }
         }
     }
 
     /** From CLR */
     private void fixAfterDeletion(Entry<K,V> x) {
+        // 需要当前是黑
         while (x != root && colorOf(x) == BLACK) {
+            // 在左边
             if (x == leftOf(parentOf(x))) {
+                // 隔壁的节点兄弟节点
                 Entry<K,V> sib = rightOf(parentOf(x));
-
+                // 兄弟节点=红
                 if (colorOf(sib) == RED) {
+                    // 变黑
                     setColor(sib, BLACK);
+                    // 父变红
                     setColor(parentOf(x), RED);
+                    //对父节点 同向旋转，此时兄弟升级
                     rotateLeft(parentOf(x));
+                    // 指向父节点的左节点，即新的兄弟节点（是原来兄弟节点的左）
                     sib = rightOf(parentOf(x));
                 }
 
+                // 兄弟节点的子节点未存在红
                 if (colorOf(leftOf(sib))  == BLACK &&
                     colorOf(rightOf(sib)) == BLACK) {
+                    // 兄弟变红，x指向父
                     setColor(sib, RED);
                     x = parentOf(x);
+               // 兄弟节点的子节点有红的情况
                 } else {
+                    // 右子是黑，即左是红的
                     if (colorOf(rightOf(sib)) == BLACK) {
-                        setColor(leftOf(sib), BLACK);
-                        setColor(sib, RED);
-                        rotateRight(sib);
-                        sib = rightOf(parentOf(x));
+                        setColor(leftOf(sib), BLACK);// 左变黑
+                        setColor(sib, RED);//兄弟节点变红
+                        rotateRight(sib);// 右旋，兄弟向右降级
+                        sib = rightOf(parentOf(x));// 更新兄弟节点指针
                     }
+                    // 最新的兄弟是黑，只有右子是红
+
+                    // 兄弟节点变成父节点颜色
                     setColor(sib, colorOf(parentOf(x)));
-                    setColor(parentOf(x), BLACK);
-                    setColor(rightOf(sib), BLACK);
+                    setColor(parentOf(x), BLACK);// 父黑
+                    setColor(rightOf(sib), BLACK);//兄弟右子变黑
+                    // 左旋父节点？，兄弟节点升级
                     rotateLeft(parentOf(x));
+
+                    // 一开始兄弟节点的子节点有红，就是终止情况
                     x = root;
                 }
             } else { // symmetric

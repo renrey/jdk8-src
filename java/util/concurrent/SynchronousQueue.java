@@ -359,8 +359,10 @@ public class SynchronousQueue<E> extends AbstractQueue<E>
                  * 当前没有head节点 or 现在进行的模式与head节点的一样，
                  * 尝试把当前节点加入到stack中
                  */
+                // 其实就是与当前head相同操作类型节点（or无节点），需要入栈
                 if (h == null || h.mode == mode) {  // empty or same-mode
                     // 需要有限时等待，但是没有足够等待时间（nanos<=0）
+                    // 有超时下，nanos<=0应该是不正确参数
                     if (timed && nanos <= 0) {      // can't wait
                         if (h != null && h.isCancelled())
                             casHead(h, h.next);     // pop cancelled node
@@ -371,6 +373,7 @@ public class SynchronousQueue<E> extends AbstractQueue<E>
                          */
                             return null;
                         /**
+                         * 正常是这里
                          * 当前节点更新为head（入栈），然后进入等待
                           */
                     } else if (casHead(h, s = snode(s, e, h, mode))) {
@@ -388,9 +391,10 @@ public class SynchronousQueue<E> extends AbstractQueue<E>
                         return (E) ((mode == REQUEST) ? m.item : s.item);
                     }
                     /**
-                     * head节点的操作不是配对mode（那就是与当前head相反的mode，head是DATA，那这个是REQUEST），
+                     * head节点的操作不是相同mode（那就是与当前head相反的mode，head是DATA，那这个是REQUEST），
                      * 是与头节点相反的mode，可以配对的
                       */
+               // 这里这个head不是FULFILLING，即只是相反模式（可FULFILLING的节点）
                 } else if (!isFulfilling(h.mode)) { // try to fulfill
                     // 发现head节点被取消了，先更新head为下一个节点，下次循环再重新继续
                     if (h.isCancelled())            // already cancelled
@@ -415,6 +419,7 @@ public class SynchronousQueue<E> extends AbstractQueue<E>
                              * 注意：这里的操作不是只在这里进行，如果有其他线程发现head节点为配对mode，也会替当前head进行配对的操作。。。
                              * 也就是下面的判断执行的操作
                              */
+                            // 把m（目标）的match更新为s（当前），且唤醒其线程
                             if (m.tryMatch(s)) {
                                 // 把当前节点and原head都从栈中弹出
                                 casHead(s, mn);     // pop both s and m
@@ -428,7 +433,7 @@ public class SynchronousQueue<E> extends AbstractQueue<E>
                         }
                     }
                     /**
-                     * 头节点是配对mode
+                     * 头节点的mode是FULFILLING
                       */
                 } else {                            // help a fulfiller
                     SNode m = h.next;               // m is h's match

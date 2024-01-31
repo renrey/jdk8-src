@@ -114,6 +114,7 @@ public class FutureTask<V> implements RunnableFuture<V> {
      */
     @SuppressWarnings("unchecked")
     private V report(int s) throws ExecutionException {
+        // 状态正常就返回outcome
         Object x = outcome;
         if (s == NORMAL)
             return (V)x;
@@ -187,8 +188,11 @@ public class FutureTask<V> implements RunnableFuture<V> {
      */
     public V get() throws InterruptedException, ExecutionException {
         int s = state;
+        // 当前state 未完成
         if (s <= COMPLETING)
+            // 会进入等待，直到state>COMPLETING
             s = awaitDone(false, 0L);
+        // 判断state是正常返回，正常就返回outcome
         return report(s);
     }
 
@@ -253,6 +257,7 @@ public class FutureTask<V> implements RunnableFuture<V> {
     }
 
     public void run() {
+        // 判断状态跟正在运行的线程
         if (state != NEW ||
             !UNSAFE.compareAndSwapObject(this, runnerOffset,
                                          null, Thread.currentThread()))
@@ -263,14 +268,15 @@ public class FutureTask<V> implements RunnableFuture<V> {
                 V result;
                 boolean ran;
                 try {
+                    // 执行
                     result = c.call();
-                    ran = true;
+                    ran = true;// 运行正常
                 } catch (Throwable ex) {
                     result = null;
-                    ran = false;
-                    setException(ex);
+                    ran = false;//// 运行异常
+                    setException(ex);// 状态已更新失败
                 }
-                if (ran)
+                if (ran)//正常才会设置结果，更新状态为NORMAL
                     set(result);
             }
         } finally {
@@ -399,24 +405,33 @@ public class FutureTask<V> implements RunnableFuture<V> {
         WaitNode q = null;
         boolean queued = false;
         for (;;) {
+            // 当前用户的线程已被中断
             if (Thread.interrupted()) {
                 removeWaiter(q);
                 throw new InterruptedException();
             }
 
             int s = state;
+            // 任务状态已完成
             if (s > COMPLETING) {
                 if (q != null)
                     q.thread = null;
                 return s;
             }
+            // 正在执行
             else if (s == COMPLETING) // cannot time out yet
-                Thread.yield();
+                Thread.yield();// 让出时间片
+           // 还是NEW的
+            // 先建个等待节点，然后下次循环判断
             else if (q == null)
                 q = new WaitNode();
+            // 这里就是上一步的后续，有等待节点了
             else if (!queued)
+                // 更新waiters为当前节点（并next指向上一个waiters）
                 queued = UNSAFE.compareAndSwapObject(this, waitersOffset,
                                                      q.next = waiters, q);
+           // 这里上一步的后续，等待节点加入到waiters
+            // 有时间等待
             else if (timed) {
                 nanos = deadline - System.nanoTime();
                 if (nanos <= 0L) {
@@ -425,6 +440,7 @@ public class FutureTask<V> implements RunnableFuture<V> {
                 }
                 LockSupport.parkNanos(this, nanos);
             }
+            // 无时间等待
             else
                 LockSupport.park(this);
         }

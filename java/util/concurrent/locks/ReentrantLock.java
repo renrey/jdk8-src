@@ -136,11 +136,12 @@ public class ReentrantLock implements Lock, java.io.Serializable {
                     return true;
                 }
             }
-            // 3. 重入判断
+            // 3.  cas 失败，重入判断
             else if (current == getExclusiveOwnerThread()) {
                 int nextc = c + acquires;
                 if (nextc < 0) // overflow
                     throw new Error("Maximum lock count exceeded");
+                // 重入了，更新state+acquires
                 setState(nextc);
                 return true;
             }
