@@ -384,16 +384,16 @@ public abstract class AbstractQueuedSynchronizer
         static final Node EXCLUSIVE = null;
 
         /** waitStatus value to indicate thread has cancelled */
-        static final int CANCELLED =  1;
+        static final int CANCELLED =  1;// 已被缺消
         /** waitStatus value to indicate successor's thread needs unparking */
-        static final int SIGNAL    = -1;
+        static final int SIGNAL    = -1;// 待唤醒
         /** waitStatus value to indicate thread is waiting on condition */
-        static final int CONDITION = -2;
+        static final int CONDITION = -2;// 在条件队列
         /**
          * waitStatus value to indicate the next acquireShared should
          * unconditionally propagate
          */
-        static final int PROPAGATE = -3;
+        static final int PROPAGATE = -3;// 表示下次acquireShared，无条件传播
 
         /**
          * Status field, taking on only the values:
@@ -681,17 +681,20 @@ public abstract class AbstractQueuedSynchronizer
          */
         for (;;) {
             Node h = head;
-            if (h != null && h != tail) {
+            // 遍历队列
+            if (h != null && h != tail) {// 队列有元素
                 int ws = h.waitStatus;
+                // 待唤醒更新0（运行中）并唤醒后面的节点（真的head）
                 if (ws == Node.SIGNAL) {
                     if (!compareAndSetWaitStatus(h, Node.SIGNAL, 0))
                         continue;            // loop to recheck cases
                     unparkSuccessor(h);
                 }
                 else if (ws == 0 &&
-                         !compareAndSetWaitStatus(h, 0, Node.PROPAGATE))
+                         !compareAndSetWaitStatus(h, 0, Node.PROPAGATE))// 运行中，则更新PROPAGATE
                     continue;                // loop on failed CAS
             }
+            // 不等的话，代表有head出队，继续循环处理
             if (h == head)                   // loop if head changed
                 break;
         }

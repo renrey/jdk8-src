@@ -808,6 +808,7 @@ public class HashMap<K,V> extends AbstractMap<K,V>
      */
     final void treeifyBin(Node<K,V>[] tab, int hash) {
         int n, index; Node<K,V> e;
+        // 当前tab可容纳的容量未超过64个，直接扩容
         if (tab == null || (n = tab.length) < MIN_TREEIFY_CAPACITY)
             resize();
         else if ((e = tab[index = (n - 1) & hash]) != null) {
@@ -2102,6 +2103,7 @@ public class HashMap<K,V> extends AbstractMap<K,V>
             // 从root节点开始
             TreeNode<K,V> root = (parent != null) ? root() : this;
             for (TreeNode<K,V> p = root;;) {
+                // dir: 比p大：1，小-1
                 int dir, ph; K pk;
                 /**
                  * 比较两个key的大小，一定要比出谁大谁小
@@ -2111,8 +2113,10 @@ public class HashMap<K,V> extends AbstractMap<K,V>
                     dir = -1;
                 else if (ph < h)
                     dir = 1;
+                // 目标节点直接返回
                 else if ((pk = p.key) == k || (k != null && k.equals(pk)))
                     return p;
+                // hash相同，但不是同一个节点
                 else if ((kc == null &&
                           (kc = comparableClassFor(k)) == null) ||
                          (dir = compareComparables(kc, k, pk)) == 0) {
@@ -2128,6 +2132,7 @@ public class HashMap<K,V> extends AbstractMap<K,V>
                     dir = tieBreakOrder(k, pk);
                 }
 
+                // 没找需要新增加节点
                 TreeNode<K,V> xp = p;
                 /**
                  * 左小右大的方式，找当前key所在的位置
@@ -2136,12 +2141,19 @@ public class HashMap<K,V> extends AbstractMap<K,V>
                  * 两个节点不只是父子关系，还是前后关系
                  * 不只是插入左右子节点，而且当前key节点会插入遍历节点的后面（如果原来有next，插入到当前key后面）
                  */
+                // 根据判断，把p指针移动到对应左右节点进行，直到对应位置没节点（即这个位置是本次放入节点的位置）
                 if ((p = (dir <= 0) ? p.left : p.right) == null) {
                     // 原来xp的next节点
                     Node<K,V> xpn = xp.next;
                     // 创建node，next为xp的next
+                    /**
+                     * 创建一个节点就是代表此次放入的
+                     */
                     TreeNode<K,V> x = map.newTreeNode(h, k, v, xpn);
                     // 左小右大，设置xp子节点
+                    /**
+                     * 把节点放入对应位置（本来就是无节点的）
+                     */
                     if (dir <= 0)
                         xp.left = x;
                     else
@@ -2489,12 +2501,14 @@ public class HashMap<K,V> extends AbstractMap<K,V>
                     (root = r).red = false;
                 // 父节点存在
                 // 下面单纯更新父节点的子节点为r（看原节点是左还是右）
+                // r替换掉p的位置
                 else if (pp.left == p)
                     pp.left = r;
                 else
                     pp.right = r;
 
                 // r的左变成p（原节点变成原右的左）
+                // r建立与p的关系
                 r.left = p;
                 p.parent = r;// 更新父节点
             }

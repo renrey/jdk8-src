@@ -94,6 +94,7 @@ public class LinkedTransferQueue<E> extends AbstractQueue<E>
     private static final long serialVersionUID = -3223113410248163686L;
 
     /*
+    双端队列
      * *** Overview of Dual Queues with Slack ***
      *
      * Dual Queues, introduced by Scherer and Scott
@@ -667,15 +668,19 @@ public class LinkedTransferQueue<E> extends AbstractQueue<E>
                  * unmatched的意思大概是节点无效了
                  * item = p: 被配对后唤醒成功返回、被中断、取消
                  * (item != null) == isData: 配对后，item！=null变成相反
+                 * item != null 代表 isData 是否符合 -》false，就是p不是数据节点
                  */
+                // 未进行match
                 if (item != p && (item != null) == isData) { // unmatched
-                    // 当前操作不是可配对的（mode都一样）
+                    // 当前操作不是可配对的-》mode都一样
                     if (isData == haveData)   // can't match
                         break;
                     // 可以配对节点
                     // 把p的item更新成e(把队列节点的item指向为当前值)
                     // 如果原来是获取mode，那item！=null
                     // 插入mode，那item==null
+
+                    // 把p 的item更新成当前e
                     if (p.casItem(item, e)) { // match
                         /**
                          * 把已配对的节点出队（更新next为head），如果没有next，就会还是以已配对作为head
@@ -689,14 +694,14 @@ public class LinkedTransferQueue<E> extends AbstractQueue<E>
                         for (Node q = p; q != h;) {
                             // p的下一个节点
                             Node n = q.next;  // update by 2 unless singleton
-                            // 如果n==null，就把head更新为p，否则更新成n
+                            // 更新head指针，大概就是不能null -》确保head=q or n
                             if (head == h && casHead(h, n == null ? q : n)) {
-                                // 更新next为自己
+                                // (原head)更新next为自己
                                 h.forgetNext();
                                 break;
                             }                 // advance and retry
 
-                            // 没有head or 没有next or next还没匹配，就可以退出循环
+                            // 没有head or head没有next（只有1个node） or next还没匹配，就可以退出循环
                             if ((h = head)   == null ||
                                 (q = h.next) == null || !q.isMatched())
                                 break;        // unless slack < 2
@@ -705,6 +710,7 @@ public class LinkedTransferQueue<E> extends AbstractQueue<E>
                          * 唤醒队列节点p的线程
                          */
                         LockSupport.unpark(p.waiter);
+                        // 匹配到，返回
                         return LinkedTransferQueue.<E>cast(item);
                     }
                 }

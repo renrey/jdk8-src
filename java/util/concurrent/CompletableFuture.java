@@ -397,6 +397,7 @@ public class CompletableFuture<T> implements Future<T>, CompletionStage<T> {
      * Default executor -- ForkJoinPool.commonPool() unless it cannot
      * support parallelism.
      */
+    // 异步线程池-ForkJoinPool 的common
     private static final Executor asyncPool = useCommonPool ?
         ForkJoinPool.commonPool() : new ThreadPerTaskExecutor();
 
@@ -536,6 +537,7 @@ public class CompletableFuture<T> implements Future<T>, CompletionStage<T> {
          */
         final boolean claim() {
             Executor e = executor;
+            // 关键
             if (compareAndSetForkJoinTaskTag((short)0, (short)1)) {
                 if (e == null)
                     return true;
@@ -664,6 +666,7 @@ public class CompletableFuture<T> implements Future<T>, CompletionStage<T> {
                 r = null;
             }
             try {
+                // claim 线程池执行原有任务
                 if (c != null && !c.claim())
                     return false;
                 @SuppressWarnings("unchecked") S s = (S) r;
@@ -707,16 +710,18 @@ public class CompletableFuture<T> implements Future<T>, CompletionStage<T> {
 
     final boolean uniRun(CompletableFuture<?> a, Runnable f, UniRun<?> c) {
         Object r; Throwable x;
+        // 就是必须有a、f参数
+        // 并且a的运行已有结果
         if (a == null || (r = a.result) == null || f == null)
             return false;
-        if (result == null) {
+        if (result == null) {// 等待判断当前futrue是否已执行过
             if (r instanceof AltResult && (x = ((AltResult)r).ex) != null)
                 completeThrowable(x, r);
             else
                 try {
                     if (c != null && !c.claim())
                         return false;
-                    f.run();
+                    f.run();// 执行f
                     completeNull();
                 } catch (Throwable ex) {
                     completeThrowable(ex);
@@ -727,11 +732,15 @@ public class CompletableFuture<T> implements Future<T>, CompletionStage<T> {
 
     private CompletableFuture<Void> uniRunStage(Executor e, Runnable f) {
         if (f == null) throw new NullPointerException();
+        // 1。创建CompletableFuture
         CompletableFuture<Void> d = new CompletableFuture<Void>();
+        // 大概要等待结果
+        // e != null -> 指定了线程池
+        // !d.uniRun(this, f, null)-> 当前future未运行结果
         if (e != null || !d.uniRun(this, f, null)) {
             UniRun<T> c = new UniRun<T>(e, d, this, f);
-            push(c);
-            c.tryFire(SYNC);
+            push(c);// 放入future自己的stack
+            c.tryFire(SYNC);// 同步等待
         }
         return d;
     }
@@ -1584,23 +1593,29 @@ public class CompletableFuture<T> implements Future<T>, CompletionStage<T> {
     /* ------------- Zero-input Async forms -------------- */
 
     @SuppressWarnings("serial")
+    // 继承ForkJoinTask
     static final class AsyncSupply<T> extends ForkJoinTask<Void>
             implements Runnable, AsynchronousCompletionTask {
-        CompletableFuture<T> dep; Supplier<T> fn;
+        CompletableFuture<T> dep; Supplier<T> fn;// 目标函数
         AsyncSupply(CompletableFuture<T> dep, Supplier<T> fn) {
             this.dep = dep; this.fn = fn;
         }
 
+        // 用来join的返回结果
         public final Void getRawResult() { return null; }
         public final void setRawResult(Void v) {}
+        // 马上执行的基础操作·
         public final boolean exec() { run(); return true; }
 
         public void run() {
+            // 所以这个基础执行
             CompletableFuture<T> d; Supplier<T> f;
             if ((d = dep) != null && (f = fn) != null) {
                 dep = null; fn = null;
                 if (d.result == null) {
                     try {
+                        // 设置CompletableFuture的返回，
+                        // 基于lambda的返回
                         d.completeValue(f.get());
                     } catch (Throwable ex) {
                         d.completeThrowable(ex);
@@ -1615,6 +1630,8 @@ public class CompletableFuture<T> implements Future<T>, CompletionStage<T> {
                                                      Supplier<U> f) {
         if (f == null) throw new NullPointerException();
         CompletableFuture<U> d = new CompletableFuture<U>();
+        // 1. 生成任务对象：AsyncSupply
+        // 2. 直接线程池执行
         e.execute(new AsyncSupply<U>(d, f));
         return d;
     }

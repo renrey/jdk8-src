@@ -106,6 +106,7 @@ public class LinkedBlockingDeque<E>
 
     private static final long serialVersionUID = -387911632671998426L;
 
+    // 双向链表
     /** Doubly-linked list node class */
     static final class Node<E> {
         /**
@@ -245,6 +246,8 @@ public class LinkedBlockingDeque<E>
         else
             l.next = node;
         ++count;
+
+        // 唤醒对立——非空
         notEmpty.signal();
         return true;
     }
@@ -392,8 +395,9 @@ public class LinkedBlockingDeque<E>
         final ReentrantLock lock = this.lock;
         lock.lock();
         try {
+            // 加入last失败
             while (!linkLast(node))
-                notFull.await();
+                notFull.await();// 失败等待notFull，可以无限等待
         } finally {
             lock.unlock();
         }
@@ -431,13 +435,16 @@ public class LinkedBlockingDeque<E>
         if (e == null) throw new NullPointerException();
         Node<E> node = new Node<E>(e);
         long nanos = unit.toNanos(timeout);
+        // 加锁
         final ReentrantLock lock = this.lock;
         lock.lockInterruptibly();
         try {
+            // 加入队last
             while (!linkLast(node)) {
+                // 不能无限等待
                 if (nanos <= 0)
                     return false;
-                nanos = notFull.awaitNanos(nanos);
+                nanos = notFull.awaitNanos(nanos);// 失败等待
             }
             return true;
         } finally {

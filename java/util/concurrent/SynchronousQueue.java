@@ -228,6 +228,7 @@ public class SynchronousQueue<E> extends AbstractQueue<E>
         /** Returns true if m has fulfilling bit set. */
         static boolean isFulfilling(int m) { return (m & FULFILLING) != 0; }
 
+        // 直接链表
         /** Node class for TransferStacks. */
         static final class SNode {
             volatile SNode next;        // next node in stack
@@ -355,94 +356,79 @@ public class SynchronousQueue<E> extends AbstractQueue<E>
 
             for (;;) {
                 SNode h = head;
-                /**
-                 * 当前没有head节点 or 现在进行的模式与head节点的一样，
-                 * 尝试把当前节点加入到stack中
-                 */
-                // 其实就是与当前head相同操作类型节点（or无节点），需要入栈
+                // stack无元素 or 当前stack元素相同mode（操作）-》准备放入
                 if (h == null || h.mode == mode) {  // empty or same-mode
-                    // 需要有限时等待，但是没有足够等待时间（nanos<=0）
-                    // 有超时下，nanos<=0应该是不正确参数
+                    // 需要马上返回
                     if (timed && nanos <= 0) {      // can't wait
                         if (h != null && h.isCancelled())
-                            casHead(h, h.next);     // pop cancelled node
+                            casHead(h, h.next);     // pop cancelled node，协助移除Cancelled节点，进入下次判断
                         else
                         /**
                          * 此处就是cache线程池offer返回null
-                         * 超时就是返回null
+                         * 无匹配mode的，需要马上返回（不等待），返回null
                          */
                             return null;
-                        /**
-                         * 正常是这里
-                         * 当前节点更新为head（入栈），然后进入等待
-                          */
-                    } else if (casHead(h, s = snode(s, e, h, mode))) {
+                    } else if (casHead(h, s = snode(s, e, h, mode))) {// 插入
                         // 进入堵塞等待
                         SNode m = awaitFulfill(s, timed, nanos);
-                        // match节点为当前节点，就是出现异常了，从队列中清除
+
+                        // 被唤醒
+                        // match节点为当前节点-》 即被取消，从队列中清除
                         if (m == s) {               // wait was cancelled
                             clean(s);
                             return null;
                         }
-                        // 把next节点更新为head
+                        // 当前s出栈
                         if ((h = head) != null && h.next == s)
                             casHead(h, s.next);     // help s's fulfiller
-                        // 阻塞被唤醒的，返回数据
+                        // 根据当前操作类型，选择返回值-》DATA的（放入）
                         return (E) ((mode == REQUEST) ? m.item : s.item);
                     }
                     /**
                      * head节点的操作不是相同mode（那就是与当前head相反的mode，head是DATA，那这个是REQUEST），
                      * 是与头节点相反的mode，可以配对的
                       */
-               // 这里这个head不是FULFILLING，即只是相反模式（可FULFILLING的节点）
+                // 当前操作mode 跟head不同，且head不是Fulfil
                 } else if (!isFulfilling(h.mode)) { // try to fulfill
-                    // 发现head节点被取消了，先更新head为下一个节点，下次循环再重新继续
+                    // head取消，出栈下次循环再重新继续
                     if (h.isCancelled())            // already cancelled
                         casHead(h, h.next);         // pop and retry
                     /**
-                     * 先把当前操作成为head（入栈），mode为配对模式（FULFILLING）
+                     * 先把当前操作成为head（入栈），mode为配对模式（FULFILLING） -》此时是s跟原head 是不同mode，所以匹配的是这2个
                      */
                     else if (casHead(h, s=snode(s, e, h, FULFILLING|mode))) {
                         for (;;) { // loop until matched or waiters disappear
-                            // 原head，就是现在的下一节点
+                            // 如果下一节点没了，当前节点（匹配mode）出栈
                             SNode m = s.next;       // m is s's match
                             if (m == null) {        // all waiters are gone
                                 casHead(s, null);   // pop fulfill node
                                 s = null;           // use new node next time
                                 break;              // restart main loop
                             }
-                            // 原head的下一节点
+                            // 当前节点下下一节点 -》用来做移除后更新指针
                             SNode mn = m.next;
-                            /**
-                             * 更新当前节点为原head的match配对节点，并且唤醒原head的线程（可能不一定是当前线程把这段操作执行完，可能是其他线程执行，但最终只有match节点是当前节点，就会返回成功）
-                             * 完成后，把这两个节点出栈（头两个节点）
-                             * 注意：这里的操作不是只在这里进行，如果有其他线程发现head节点为配对mode，也会替当前head进行配对的操作。。。
-                             * 也就是下面的判断执行的操作
-                             */
-                            // 把m（目标）的match更新为s（当前），且唤醒其线程
+
+                            // 当把下一的match更新成s，并唤醒线程
                             if (m.tryMatch(s)) {
-                                // 把当前节点and原head都从栈中弹出
+                                // 当前节点、下一节点都出栈 -》等于这2个是匹配的
                                 casHead(s, mn);     // pop both s and m
                                 // 后面的操作，返回数据
                                 return (E) ((mode == REQUEST) ? m.item : s.item);
                             } else                  // lost match
-                            /**
-                             * 此时原head已经cancel、超时，已经不属于队列，所以与下一个节点进行
-                             */
+                            // 下一节点已被别的线程匹配，移除下一节点
                                 s.casNext(m, mn);   // help unlink
                         }
                     }
-                    /**
-                     * 头节点的mode是FULFILLING
-                      */
                 } else {                            // help a fulfiller
+                    // 当前操作mode 跟head不同，且head是Fulfil -》即head正在对它的下一个节点进行匹配
+
+                    // 协助快速处理出栈 -》避免线程切换，导致匹配节点阻塞等待，这边也阻塞等待
                     SNode m = h.next;               // m is h's match
-                    /**
-                     * 这里也进行了头节点的配对操作
-                     */
+                    // 代表当前匹配mode没可操作，出栈
                     if (m == null)                  // waiter is gone
                         casHead(h, null);           // pop fulfilling node
                     else {
+                        // 有节点，帮h进行配对
                         SNode mn = m.next;
                         if (m.tryMatch(h))          // help match
                             casHead(h, mn);         // pop both h and m
@@ -741,13 +727,13 @@ public class SynchronousQueue<E> extends AbstractQueue<E>
                 QNode h = head;
                 if (t == null || h == null)         // saw uninitialized value
                     continue;                       // spin
-                // 没有元素or 与tail相同mode
+                // 队列没有元素 or 与tail相同mode
                 if (h == t || t.isData == isData) { // empty or same-mode
                     QNode tn = t.next;
                     // double check
                     if (t != tail)                  // inconsistent read
                         continue;
-                    // 就是更新到tail的next为null
+                    // 发现有入队的，协助更新tail
                     if (tn != null) {               // lagging tail
                         advanceTail(t, tn);
                         continue;
@@ -757,17 +743,18 @@ public class SynchronousQueue<E> extends AbstractQueue<E>
                      */
                     if (timed && nanos <= 0)        // can't wait
                         return null;
+                    // 本次操作的节点
                     if (s == null)
                         s = new QNode(e, isData);
-                    /**
-                     * 加当前节点设为tail的next
-                     */
+                    // 直接入队尾
                     if (!t.casNext(null, s))        // failed to link in
                         continue;
-                    // 加入成功后，需要tail指向当前节点
+                    // 更新tail指针为当前s
                     advanceTail(t, s);              // swing tail and wait
                     // 进行阻塞等待
                     Object x = awaitFulfill(s, e, timed, nanos);
+
+                    // 被唤醒
                     // 堵塞时出现异常，从队列删除
                     if (x == s) {                   // wait was cancelled
                         clean(t, s);
@@ -792,7 +779,7 @@ public class SynchronousQueue<E> extends AbstractQueue<E>
 
                     Object x = m.item;
                     /**
-                     * 更新head的item为当前值
+                     * 通过cas更新head的item 来竞争
                      */
                     if (isData == (x != null) ||    // m already fulfilled
                         x == m ||                   // m cancelled
@@ -800,7 +787,7 @@ public class SynchronousQueue<E> extends AbstractQueue<E>
                         advanceHead(h, m);          // dequeue and retry
                         continue;
                     }
-                    // 把head出队，head变成next
+                    // 把head出队
                     advanceHead(h, m);              // successfully fulfilled
                     // 唤醒对应的进程
                     LockSupport.unpark(m.waiter);
@@ -1027,6 +1014,7 @@ public class SynchronousQueue<E> extends AbstractQueue<E>
      * @throws InterruptedException {@inheritDoc}
      */
     public E poll(long timeout, TimeUnit unit) throws InterruptedException {
+
         E e = transferer.transfer(null, true, unit.toNanos(timeout));
         if (e != null || !Thread.interrupted())
             return e;
@@ -1041,6 +1029,7 @@ public class SynchronousQueue<E> extends AbstractQueue<E>
      *         element is available
      */
     public E poll() {
+
         return transferer.transfer(null, true, 0);
     }
 

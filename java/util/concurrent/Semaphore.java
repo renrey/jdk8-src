@@ -177,7 +177,9 @@ public class Semaphore implements java.io.Serializable {
         final int nonfairTryAcquireShared(int acquires) {
             for (;;) {
                 int available = getState();
+                // 计算 扣除后
                 int remaining = available - acquires;
+                // 更新扣除后的
                 if (remaining < 0 ||
                     compareAndSetState(available, remaining))
                     return remaining;

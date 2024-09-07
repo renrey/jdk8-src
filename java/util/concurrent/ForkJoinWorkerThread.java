@@ -88,6 +88,7 @@ public class ForkJoinWorkerThread extends Thread {
         // Use a placeholder until a useful name can be set in registerWorker
         super("aForkJoinWorkerThread");
         this.pool = pool;
+        // 注册注册
         this.workQueue = pool.registerWorker(this);
     }
 
